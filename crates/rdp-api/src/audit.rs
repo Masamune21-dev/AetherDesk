@@ -29,6 +29,8 @@ pub mod aksi {
     pub const ORG_DIBUAT: &str = "org.bootstrap";
     pub const DEVICE_DIDAFTARKAN: &str = "device.register";
     pub const DEVICE_SANDI_DIROTASI: &str = "device.rotate_password";
+    pub const DEVICE_TOKEN_ENROLMENT: &str = "device.enrolment_token";
+    pub const DEVICE_ENROL: &str = "device.enrol";
     pub const SESI_DIMINTA: &str = "session.request";
     pub const SESI_DITOLAK: &str = "session.rejected";
 }
@@ -82,6 +84,8 @@ mod tests {
             aksi::ORG_DIBUAT,
             aksi::DEVICE_DIDAFTARKAN,
             aksi::DEVICE_SANDI_DIROTASI,
+            aksi::DEVICE_TOKEN_ENROLMENT,
+            aksi::DEVICE_ENROL,
             aksi::SESI_DIMINTA,
             aksi::SESI_DITOLAK,
         ] {
@@ -97,6 +101,7 @@ mod tests {
         let semua = [
             aksi::LOGIN, aksi::LOGIN_GAGAL, aksi::LOGOUT, aksi::ORG_DIBUAT,
             aksi::DEVICE_DIDAFTARKAN, aksi::DEVICE_SANDI_DIROTASI,
+            aksi::DEVICE_TOKEN_ENROLMENT, aksi::DEVICE_ENROL,
             aksi::SESI_DIMINTA, aksi::SESI_DITOLAK,
         ];
         assert_eq!(semua.iter().collect::<HashSet<_>>().len(), semua.len());

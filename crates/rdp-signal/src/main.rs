@@ -136,6 +136,43 @@ async fn tangani(socket: WebSocket, state: AppState) {
         return;
     };
 
+    // ── Token perangkat menetapkan identitasnya sendiri ─────────────────────
+    //
+    // Sebelum ada identitas perangkat, peran agent ditentukan sepenuhnya oleh
+    // `device_uuid` di dalam pesan AUTH — artinya siapa pun yang terautentikasi
+    // dapat mengaku sebagai perangkat mana pun di organisasinya.
+    //
+    // Token perangkat menutup itu: perangkat yang boleh diwakilinya tertulis di
+    // dalam token, ditandatangani server, dan tidak dapat ditawar lewat isi
+    // pesan. Sebuah agent juga tidak boleh berperan sebagai viewer — bila bisa,
+    // satu mesin yang disusupi dapat membuka sesi ke seluruh perangkat lain di
+    // organisasi yang sama.
+    //
+    // Token pengguna berikut `device_uuid` tetap diterima apa adanya: itulah
+    // jalur agent berbasis browser yang sudah berjalan di produksi, dan
+    // memutusnya di sini akan mematikan satu-satunya agent yang sekarang ada.
+    let device_uuid = match claims.device_uuid() {
+        Some(dari_token) => {
+            if matches!(device_uuid, Some(diminta) if diminta != dari_token) {
+                tracing::warn!(
+                    token_untuk = %dari_token,
+                    "token perangkat dipakai untuk mengaku sebagai perangkat lain"
+                );
+                let _ = tx.send(
+                    Keluar::error(
+                        "PERMISSION_DENIED",
+                        "token perangkat tidak berlaku untuk perangkat lain",
+                    )
+                    .ke_json(),
+                );
+                tutup_setelah_terkuras(tx, penulis).await;
+                return;
+            }
+            Some(dari_token)
+        }
+        None => device_uuid,
+    };
+
     let koneksi = Koneksi {
         pengirim: tx.clone(),
         user_id: claims.sub,

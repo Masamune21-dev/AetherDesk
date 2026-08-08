@@ -3,5 +3,6 @@
 pub mod auth;
 pub mod connect;
 pub mod devices;
+pub mod enrolment;
 pub mod sessions;
 pub mod turn;

@@ -96,6 +96,17 @@ async fn main() -> Result<()> {
             "/devices/{device_uuid}/rotate-password",
             post(routes::devices::rotasi_password),
         )
+        // Identitas perangkat. Dua di antaranya sengaja **tanpa** autentikasi
+        // pengguna: agent tidak punya sesi manusia, dan itulah pokok
+        // rancangannya. Kredensialnya adalah token enrolment sekali pakai,
+        // lalu tanda tangan kunci perangkat.
+        .route(
+            "/devices/enrolment-tokens",
+            post(routes::enrolment::terbitkan),
+        )
+        .route("/devices/enrol", post(routes::enrolment::enrol))
+        .route("/devices/token", post(routes::enrolment::token_perangkat))
+        .route("/devices/heartbeat", post(routes::enrolment::heartbeat))
         .route("/connect", post(routes::connect::connect))
         .route("/turn-credentials", get(routes::turn::kredensial))
         .route("/sessions", get(routes::sessions::daftar))

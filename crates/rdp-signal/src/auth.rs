@@ -16,14 +16,50 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Jenis subjek token. Nilainya wajib sama persis dengan `rdp-api`.
+pub mod jenis {
+    pub const PENGGUNA: &str = "user";
+    pub const PERANGKAT: &str = "device";
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Uuid,
     pub org: Uuid,
+    #[serde(default)]
     pub email: String,
     pub exp: i64,
     pub iat: i64,
     pub iss: String,
+
+    /// `user` atau `device`. Token yang sudah beredar sebelum identitas
+    /// perangkat ada tidak memuat klaim ini; nilai baku menjaga sesi berjalan
+    /// tidak tertolak serentak saat layanan di-restart.
+    #[serde(default = "jenis_baku")]
+    pub typ: String,
+
+    /// Device UUID pada token perangkat.
+    #[serde(default)]
+    pub dev: Option<Uuid>,
+}
+
+fn jenis_baku() -> String {
+    jenis::PENGGUNA.to_string()
+}
+
+impl Claims {
+    pub fn adalah_perangkat(&self) -> bool {
+        self.typ == jenis::PERANGKAT
+    }
+
+    /// Device UUID, hanya bila token ini memang token perangkat.
+    pub fn device_uuid(&self) -> Option<Uuid> {
+        if self.adalah_perangkat() {
+            self.dev
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -95,8 +131,40 @@ mod tests {
             exp: 0,
             iat: 0,
             iss: "aetherdesk".into(),
+            typ: jenis::PENGGUNA.into(),
+            dev: None,
         };
         let j = serde_json::to_value(&c).unwrap();
         assert!(j.get("org").is_some());
+    }
+
+    #[test]
+    fn token_lama_tanpa_typ_terbaca_sebagai_pengguna() {
+        let lama = r#"{"sub":"00000000-0000-0000-0000-000000000000",
+                       "org":"00000000-0000-0000-0000-000000000000",
+                       "email":"a@b.c","exp":0,"iat":0,"iss":"aetherdesk"}"#;
+        let c: Claims = serde_json::from_str(lama).unwrap();
+        assert!(!c.adalah_perangkat());
+        assert_eq!(c.device_uuid(), None);
+    }
+
+    #[test]
+    fn device_uuid_hanya_dari_token_perangkat() {
+        let dev = Uuid::new_v4();
+        let mut c = Claims {
+            sub: dev,
+            org: Uuid::nil(),
+            email: String::new(),
+            exp: 0,
+            iat: 0,
+            iss: "aetherdesk".into(),
+            typ: jenis::PERANGKAT.into(),
+            dev: Some(dev),
+        };
+        assert_eq!(c.device_uuid(), Some(dev));
+
+        // Klaim `dev` pada token pengguna tidak boleh berlaku.
+        c.typ = jenis::PENGGUNA.into();
+        assert_eq!(c.device_uuid(), None);
     }
 }

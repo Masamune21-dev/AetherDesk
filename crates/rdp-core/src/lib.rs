@@ -12,6 +12,7 @@
 //! - [`damm`] — check digit untuk device ID
 //! - [`ids`] — newtype identitas domain
 //! - [`password`] — password sesi sekali pakai
+//! - [`device_key`] — identitas perangkat Ed25519 dan tantangan autentikasi
 //! - [`event`] — domain event dan abstraksi [`event::EventBus`]
 //! - [`error`] — taksonomi error inti
 
@@ -19,11 +20,13 @@
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
 pub mod damm;
+pub mod device_key;
 pub mod error;
 pub mod event;
 pub mod ids;
 pub mod password;
 
+pub use device_key::DeviceKeypair;
 pub use error::{CoreError, Result};
 pub use event::{DomainEvent, EventBus, InProcessBus, QuickConnectOutcome};
 pub use ids::{DeviceId, DeviceUuid, OrgId, SessionId, UserId};

@@ -15,6 +15,19 @@ rand = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
 
+# Identitas perangkat. Ditaruh di crate inti — bukan diduplikasi di rdp-api dan
+# rdp-agent — supaya penanda tangan dan pemverifikasi mustahil membangun
+# tantangan yang berbeda. Itu kelas bug yang gejalanya hanya "tanda tangan
+# ditolak", tanpa petunjuk sisi mana yang keliru.
+#
+# `ed25519-dalek` murni Rust dan tidak menarik `ring`, jadi batasan yang
+# disebut rdp-signal/auth.rs — menjaga crate inti tetap ringan demi NFR-PER-06
+# (agent < 20 MB) — tetap terjaga.
+ed25519-dalek = { version = "2", default-features = false, features = [
+    "std", "fast", "zeroize", "rand_core",
+] }
+base64 = "0.22"
+
 [dev-dependencies]
 serde_json = { workspace = true }
 tokio = { workspace = true }

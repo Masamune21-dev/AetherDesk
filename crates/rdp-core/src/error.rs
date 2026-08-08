@@ -30,6 +30,15 @@ pub enum CoreError {
     TokenExpired,
     #[error("sertifikat device tidak valid")]
     DeviceCertInvalid,
+    /// Material kunci cacat — panjang salah, base64 rusak, atau titik kurva
+    /// yang tidak sah.
+    ///
+    /// Ketiganya sengaja dilebur menjadi satu varian. Yang membocorkan
+    /// informasi bukanlah pesannya, melainkan **perbedaan** antar sebab: ia
+    /// memberi tahu penyerang seberapa jauh tebakannya sudah benar. Karena
+    /// perbedaan itu sudah hilang di sini, pesannya sendiri aman disampaikan.
+    #[error("kunci perangkat tidak valid")]
+    KunciTidakValid,
     #[error("izin ditolak")]
     PermissionDenied,
     #[error("MFA diperlukan")]
@@ -82,6 +91,7 @@ impl CoreError {
             Self::InvalidToken => "INVALID_TOKEN",
             Self::TokenExpired => "TOKEN_EXPIRED",
             Self::DeviceCertInvalid => "DEVICE_CERT_INVALID",
+            Self::KunciTidakValid => "INVALID_DEVICE_KEY",
             Self::PermissionDenied => "PERMISSION_DENIED",
             Self::MfaRequired => "MFA_REQUIRED",
             Self::SessionNotFound => "SESSION_NOT_FOUND",
@@ -104,6 +114,7 @@ impl CoreError {
     pub fn http_status(&self) -> u16 {
         match self {
             Self::InvalidToken | Self::TokenExpired | Self::DeviceCertInvalid => 401,
+            Self::KunciTidakValid => 400,
             Self::PermissionDenied => 403,
             Self::MfaRequired => 403,
             Self::SessionNotFound => 404,

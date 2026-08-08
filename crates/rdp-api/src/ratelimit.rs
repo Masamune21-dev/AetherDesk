@@ -36,6 +36,20 @@ pub const ID_TAK_DIKENAL_PER_IP: Aturan = Aturan {
     jeda_detik: 86_400,
 };
 
+/// Batas enrolment gagal per IP sumber: 10 dalam 1 jam, jeda 1 jam.
+///
+/// Token enrolment beruang 256 bit, jadi ini **bukan** perlindungan terhadap
+/// tebakan — menebaknya sudah mustahil tanpa bantuan apa pun. Yang dibatasi
+/// adalah biayanya bagi kita: setiap upaya menjalankan SHA-256 dan satu query,
+/// dan endpointnya terbuka tanpa autentikasi. Jedanya lebih pendek daripada
+/// `ID_TAK_DIKENAL_PER_IP` karena salah ketik saat memasang agent adalah
+/// kejadian wajar, sementara memindai ruang device ID tidak.
+pub const ENROLMENT_PER_IP: Aturan = Aturan {
+    maks: 10,
+    jendela_detik: 3600,
+    jeda_detik: 3600,
+};
+
 /// Memeriksa apakah kunci sedang dijeda, **tanpa** menambah hitungan.
 ///
 /// Dipisahkan dari [`catat_kegagalan`] secara sengaja: percobaan yang ditolak
