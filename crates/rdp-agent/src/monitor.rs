@@ -66,13 +66,66 @@ pub fn bounding_box(monitors: &[Monitor]) -> Option<(i32, i32, u32, u32)> {
 
 // ── Windows ──────────────────────────────────────────────────────────────────
 
+/// Menyatakan proses ini sadar-DPI per monitor sebelum satu pun koordinat dibaca.
+///
+/// Tanpa ini Windows **memvirtualkan** seluruh koordinat dan ukuran yang
+/// dilaporkannya: pada monitor 1920×1080 berskala 150%, proses yang tidak
+/// sadar-DPI melihat 1280×720. Angkanya konsisten dan tampak masuk akal, jadi
+/// kesalahannya tidak terlihat sampai dipakai — dan tiga tempat langsung
+/// terpengaruh:
+///
+/// - `ke_absolut()` menghasilkan piksel yang meleset, sehingga `SendInput`
+///   dengan `MOUSEEVENTF_ABSOLUTE` mengklik di tempat yang salah (M4)
+/// - Desktop Duplication menyerahkan frame beresolusi **fisik**, yang tidak
+///   akan cocok dengan tata letak yang sudah terlanjur dilaporkan (M2)
+/// - Bounding box virtual desktop menyusut, sehingga monitor bisa saling tindih
+///
+/// Dipanggil lewat `Once` dari dalam `enumerasi()` supaya pemanggil tidak
+/// mungkin lupa. Kegagalan tidak fatal — Windows lama tanpa
+/// `SetProcessDpiAwarenessContext` tetap berjalan, hanya dengan koordinat
+/// tervirtualisasi, dan itu tercatat di log.
+#[cfg(windows)]
+fn siapkan_dpi() {
+    use std::sync::Once;
+    use windows::Win32::UI::HiDpi::{
+        SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    };
+
+    static SEKALI: Once = Once::new();
+    SEKALI.call_once(|| unsafe {
+        if let Err(e) = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
+            tracing::warn!(
+                error = %e,
+                "gagal menyatakan kesadaran DPI per monitor — koordinat mungkin tervirtualisasi"
+            );
+        }
+    });
+}
+
+/// Mengubah DPI mentah menjadi persen penskalaan (96 DPI = 100%).
+///
+/// Seluruh langkah baku Windows — 100, 125, 150, 175, 200, 225, 250% — jatuh
+/// tepat pada bilangan bulat. Pembulatan ke terdekat hanya berlaku bagi
+/// penskalaan kustom yang dimasukkan pengguna sendiri.
+#[cfg(any(windows, test))]
+fn dpi_ke_persen(dpi: u32) -> u32 {
+    if dpi == 0 {
+        100
+    } else {
+        (dpi * 100 + 48) / 96
+    }
+}
+
 #[cfg(windows)]
 pub fn enumerasi() -> anyhow::Result<Vec<Monitor>> {
     use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
-        MONITORINFOF_PRIMARY,
     };
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
+
+    siapkan_dpi();
 
     unsafe extern "system" fn callback(
         h: HMONITOR,
@@ -96,6 +149,16 @@ pub fn enumerasi() -> anyhow::Result<Vec<Monitor>> {
                 .trim_end_matches('\0')
                 .to_string();
 
+            // DPI efektif, bukan DPI mentah panel: inilah angka yang dipakai
+            // Windows untuk menata jendela, jadi ini pula yang perlu diketahui
+            // viewer saat menggambar kursor dan menyekala teks.
+            let mut dpi_x = 0u32;
+            let mut dpi_y = 0u32;
+            let skala = match GetDpiForMonitor(h, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) {
+                Ok(()) => dpi_ke_persen(dpi_x),
+                Err(_) => 100,
+            };
+
             keluar.push(Monitor {
                 id: keluar.len() as u32,
                 name: if nama.is_empty() {
@@ -108,8 +171,7 @@ pub fn enumerasi() -> anyhow::Result<Vec<Monitor>> {
                 width: (r.right - r.left) as u32,
                 height: (r.bottom - r.top) as u32,
                 is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
-                // Penskalaan per-monitor menyusul; 100 aman sebagai nilai awal.
-                scale_percent: 100,
+                scale_percent: skala,
             });
         }
         BOOL(1)
@@ -206,5 +268,28 @@ mod tests {
     #[test]
     fn bounding_box_kosong_untuk_daftar_kosong() {
         assert!(bounding_box(&[]).is_none());
+    }
+
+    #[test]
+    fn langkah_penskalaan_baku_windows_bulat() {
+        // Nilai-nilai inilah yang benar-benar muncul di pengaturan tampilan.
+        for (dpi, persen) in [
+            (96, 100),
+            (120, 125),
+            (144, 150),
+            (168, 175),
+            (192, 200),
+            (216, 225),
+            (240, 250),
+        ] {
+            assert_eq!(dpi_ke_persen(dpi), persen, "DPI {dpi}");
+        }
+    }
+
+    #[test]
+    fn dpi_nol_dianggap_seratus_persen() {
+        // GetDpiForMonitor yang gagal meninggalkan variabel keluarannya apa
+        // adanya; menganggapnya 0% akan membuat viewer membagi dengan nol.
+        assert_eq!(dpi_ke_persen(0), 100);
     }
 }

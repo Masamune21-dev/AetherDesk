@@ -26,6 +26,147 @@ Format: tanggal, ringkasan, detail, dan keputusan yang menunggu jawaban.
 ---
 
 
+## 2026-08-09 — Sesi 2: Agent native terkompilasi di Windows
+
+Sesi pertama yang dijalankan **dari PC Windows**, bukan dari macOS. Itu yang
+menghilangkan satu-satunya penghalang M1: kode ber-`#[cfg(windows)]` akhirnya
+bertemu compiler yang bisa memeriksanya.
+
+### Yang dikerjakan
+
+**28. Toolchain Windows terpasang**
+
+| Komponen | Versi |
+|---|---|
+| Rust | 1.97.1 (MSVC) |
+| Visual Studio Build Tools | 17.14.37516.0, workload Desktop C++ |
+| Windows SDK | 10.0.26100.0 |
+| OS | Windows 11 Pro 26200 |
+
+Dipasang lewat `winget`. Prasyarat BUILD_WINDOWS.md §2 terpenuhi seluruhnya.
+
+**29. `monitor.rs` dikompilasi untuk pertama kalinya — satu galat**
+
+BUILD_WINDOWS.md memperingatkan bahwa berkas ini ditulis dari pengetahuan API,
+bukan dari verifikasi compiler, dan memperkirakan "satu-dua ketidakcocokan tipe
+atau nama item". Perkiraannya tepat, dan bahkan lebih ringan dari itu:
+
+```
+error[E0432]: unresolved import `windows::Win32::Graphics::Gdi::MONITORINFOF_PRIMARY`
+```
+
+`MONITORINFOF_PRIMARY` berada di `Win32::UI::WindowsAndMessaging`, bukan di
+`Win32::Graphics::Gdi`. Satu baris import. Segala hal lain yang layak
+dikhawatirkan — tata letak `MONITORINFOEXW`, `cbSize` yang harus menunjuk ke
+struct luar, tanda tangan callback `EnumDisplayMonitors`, konversi `LPARAM`
+ke pointer `Vec` — lolos apa adanya.
+
+**30. Kesadaran DPI — bug yang compiler tidak akan pernah temukan**
+
+Ini temuan sungguhan dari sesi ini, dan jauh lebih berbahaya daripada galat di
+atas justru karena tidak menghasilkan pesan apa pun.
+
+Proses yang tidak menyatakan dirinya sadar-DPI menerima koordinat **yang sudah
+divirtualkan** Windows. Monitor 1920×1080 berskala 150% terbaca 1280×720.
+Angkanya konsisten, wajar, dan salah. `scale_percent` sebelumnya dipatok 100
+dengan komentar "menyusul", padahal fitur `Win32_UI_HiDpi` sudah lama ada di
+`Cargo.toml` — niatnya sudah tercatat, implementasinya belum ditulis.
+
+Tiga akibat yang menunggu di hilir bila dibiarkan:
+
+| Tahap | Akibat |
+|---|---|
+| M4 | `ke_absolut()` menghasilkan piksel meleset, `SendInput` mengklik di tempat salah |
+| M2 | Desktop Duplication menyerahkan frame beresolusi **fisik** yang tidak cocok dengan tata letak yang sudah dikirim |
+| M3 | Bounding box virtual desktop menyusut, monitor bisa terhitung saling tindih |
+
+Perbaikan: `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` dipanggil lewat
+`Once` **dari dalam `enumerasi()`**, bukan dari `main()` — supaya pemanggil
+tidak mungkin lupa. `scale_percent` kini diisi `GetDpiForMonitor` dengan
+`MDT_EFFECTIVE_DPI`.
+
+**31. Enumerasi terverifikasi silang**
+
+Mesin uji punya dua monitor, yang sekunder tegak dan di kiri-atas:
+
+```
+ID   NAMA                         X       Y   LEBAR  TINGGI  SKALA  PRIMER
+0    \\.\DISPLAY1                 0       0    1920    1080   100%  ya
+1    \\.\DISPLAY2             -1080    -406    1080    1920   100%
+
+Virtual desktop: 3000×1920 mulai dari (-1080, -406)
+```
+
+Susunan ini **lebih ketat daripada contoh di dokumen**: X dan Y dua-duanya
+negatif, bukan hanya X. Persis bentuk yang dimaksud temuan T-16, dan kebetulan
+sudah tersedia tanpa perlu menata ulang monitor.
+
+Diverifikasi silang terhadap `System.Windows.Forms.Screen::AllScreens` dan
+`SystemInformation::VirtualScreen` — jalur yang sepenuhnya berbeda dari
+`EnumDisplayMonitors`. **Identik sampai angka terakhir**, termasuk bounding box
+3000×1920 dari (−1080, −406).
+
+**32. 111 unit test lulus di Windows**
+
+| Crate | Test |
+|---|---|
+| `rdp-core` | 33 |
+| `rdp-api` | 48 |
+| `rdp-signal` | 18 + 2 |
+| `rdp-agent` | 10 |
+
+Sebelumnya angka ini hanya pernah dibuktikan di Linux. Tidak ada satu pun test
+yang bergantung platform — hasilnya sama di kedua sisi.
+
+**33. Working tree disambungkan ke remote**
+
+Salinan di PC ini datang tanpa `.git`. Disambungkan ulang lewat `git init` +
+`fetch` + `reset --mixed origin/main`, yang hanya memperbarui index dan tidak
+menyentuh satu berkas pun — sehingga hasil kerja lokal langsung terlihat sebagai
+diff terhadap `c4fe5a8`, bukan sebagai repo baru tanpa riwayat.
+
+Akses server dari PC ini diuji dan **sehat**, berbeda dari blocker sesi 1:
+
+| Uji | Hasil |
+|---|---|
+| ICMP ke `<HOST-LAN>` | hidup |
+| TCP 22 | terbuka |
+| `https://aetherdesk.masamune.my.id/api/health` | **200** |
+
+### Temuan yang belum ditindaklanjuti
+
+**`Cargo.lock` tidak pernah dikomit.** Untuk workspace yang menghasilkan biner
+terpasang di mesin orang, ini gap yang nyata — dan baru saja terwujud secara
+konkret: build Windows ini me-resolve 309 paket dari nol, tanpa jaminan
+versinya sama dengan yang sedang berjalan di server produksi.
+
+**`id` monitor berasal dari urutan enumerasi.** Urutan `EnumDisplayMonitors`
+tidak dijanjikan stabil. Begitu M3 mengirim `MONITOR_SELECT`, mencabut satu
+monitor akan menggeser id yang lain, dan viewer akan menunjuk layar yang salah.
+Identitas yang stabil sebaiknya diturunkan dari nama perangkat, bukan dari
+posisi dalam daftar.
+
+**Skala ≠ 100% belum pernah diuji.** Kedua monitor mesin uji memakai 100%, jadi
+jalur DPI benar secara konstruksi tetapi belum terbukti secara empiris.
+
+### Keadaan M1
+
+| Bagian | Keadaan |
+|---|---|
+| Enumerasi monitor | **selesai dan terverifikasi** |
+| Identitas perangkat Ed25519 | belum |
+| Registrasi ke `POST /api/v1/devices` | belum |
+| Heartbeat | belum |
+| Koneksi signaling | belum |
+
+Catatan untuk bagian yang belum: `POST /api/v1/devices` sekarang mewajibkan JWT
+**pengguna**, dan `Masuk::Auth` di `rdp-signal` juga menerima token pengguna.
+Artinya agent perlu satu bentuk kredensial miliknya sendiri — token enrolment
+atau kunci perangkat — dan itu **perubahan sisi server**, bukan hanya pekerjaan
+di crate agent.
+
+---
+
 ## 2026-08-08 — Sesi 1: Review dokumentasi, survei server, inisialisasi repo
 
 ### Yang dikerjakan

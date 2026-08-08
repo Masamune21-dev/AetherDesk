@@ -25,18 +25,17 @@ server yang sudah berjalan.
 
 ---
 
-> ⚠ **Kode Windows di `monitor.rs` belum pernah dikompilasi.** Ia ditulis dari
-> pengetahuan tentang API `EnumDisplayMonitors` dan crate `windows` 0.58, bukan
-> hasil verifikasi compiler — mesin pengembangan yang dipakai menulisnya adalah
-> macOS, dan bagian ber-`#[cfg(windows)]` tidak ikut diperiksa di sana.
+> ✅ **Sudah terkompilasi dan berjalan di Windows** — 2026-08-09, Windows 11 Pro
+> 26200, Rust 1.97.1 MSVC, Build Tools 17.14, Windows SDK 10.0.26100.
 >
-> Kemungkinan besar ada satu-dua ketidakcocokan tipe atau nama item yang
-> berubah antar versi crate `windows`. Kalau `cargo build` gagal, **kirimkan
-> pesan galatnya apa adanya** — biasanya perbaikannya satu baris, dan jauh lebih
-> cepat daripada menebak-nebak sendiri.
+> Peringatan sebelumnya di tempat ini menyebut `monitor.rs` belum pernah
+> disentuh compiler. Perkiraannya tepat sasaran: **satu** galat, dan memang
+> perbaikannya satu baris — `MONITORINFOF_PRIMARY` berada di
+> `Win32::UI::WindowsAndMessaging`, bukan di `Win32::Graphics::Gdi` seperti yang
+> diasumsikan. Seluruh sisanya — `MONITORINFOEXW`, tanda tangan callback
+> `EnumDisplayMonitors`, konversi `LPARAM` — lolos apa adanya.
 >
-> Sisanya (`rdp-core`, `rdp-api`, `rdp-signal`) sudah terbukti kompilasi dan
-> lulus 101 unit test di Linux.
+> Seluruh workspace lulus **111 unit test** di Windows, sama seperti di Linux.
 
 ---
 
@@ -115,25 +114,30 @@ Inilah yang membuat perjalanan ini bermakna. Jalankan:
 .\target\release\rdp-agent.exe monitors
 ```
 
-Keluaran yang diharapkan pada mesin bermonitor tiga:
+Keluaran sungguhan dari mesin uji pertama — dua monitor, yang sekunder
+diputar tegak dan diletakkan di kiri-atas:
 
 ```
-3 monitor terdeteksi
+2 monitor terdeteksi
 
-ID   NAMA                         X       Y   LEBAR  TINGGI  PRIMER
-──────────────────────────────────────────────────────────────────────────
-0    \\.\DISPLAY1                 0       0    1920    1080  ya
-1    \\.\DISPLAY2             -1920       0    1920    1080
-2    \\.\DISPLAY3              1920    -200    2560    1440
+ID   NAMA                         X       Y   LEBAR  TINGGI  SKALA  PRIMER
+─────────────────────────────────────────────────────────────────────────────────
+0    \\.\DISPLAY1                 0       0    1920    1080   100%  ya
+1    \\.\DISPLAY2             -1080    -406    1080    1920   100%
 
-Virtual desktop: 6400×1640 mulai dari (-1920, -200)
+Virtual desktop: 3000×1920 mulai dari (-1080, -406)
+
+1 monitor berkoordinat negatif:
+  \\.\DISPLAY2 pada (-1080, -406)
 ```
 
 ### 5.1 Yang paling perlu Anda perhatikan
 
-Perhatikan `DISPLAY2` berkoordinat **X = −1920**. Monitor yang diletakkan di
-sebelah **kiri** monitor primer memang berkoordinat negatif, dan susunan itu
-sangat umum.
+Perhatikan `DISPLAY2` berkoordinat **X = −1080 dan Y = −406**. Monitor yang
+diletakkan di sebelah **kiri** monitor primer memang berkoordinat negatif, dan
+susunan itu sangat umum. Ketika ia juga tidak sejajar di bagian atas — dan itu
+hampir selalu terjadi pada monitor tegak yang lebih tinggi — sumbu Y ikut
+negatif.
 
 Agent akan memberi tahu Anda bila belum ada monitor berkoordinat negatif, dan
 meminta Anda memindahkan satu monitor ke kiri lewat pengaturan tampilan lalu
@@ -141,9 +145,35 @@ menjalankannya ulang. Ini bukan basa-basi: implementasi yang memakai tipe tak
 bertanda akan tampak sempurna pada susunan kiri-ke-kanan yang rapi, lalu rusak
 diam-diam bagi pengguna yang menyusun monitornya berbeda. Temuan **T-16**.
 
-Jalankan sekali pada susunan rapi dan sekali dengan monitor di kiri. Kirimkan
-kedua keluarannya — itu yang saya pakai untuk memastikan pemetaan koordinatnya
-benar sebelum injeksi input dibuat.
+Cara memverifikasinya tanpa mempercayai agent sendiri — Windows dimintai
+jawaban yang sama lewat jalur yang sama sekali berbeda:
+
+```powershell
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Screen]::AllScreens |
+    ForEach-Object { "{0} {1} Primary={2}" -f $_.DeviceName, $_.Bounds, $_.Primary }
+[System.Windows.Forms.SystemInformation]::VirtualScreen
+```
+
+Keluaran keduanya harus identik sampai ke angka terakhir. Pada mesin uji
+pertama memang demikian.
+
+### 5.2 Kesadaran DPI
+
+Kolom `SKALA` berasal dari `GetDpiForMonitor`, dan agent menyatakan dirinya
+`PER_MONITOR_AWARE_V2` sebelum membaca koordinat mana pun.
+
+Tanpa pernyataan itu Windows memvirtualkan seluruh angka yang dilaporkannya:
+monitor 1920×1080 berskala 150% akan terbaca 1280×720. Angkanya konsisten dan
+tampak masuk akal, sehingga kesalahannya baru terlihat jauh di hilir — kursor
+yang meleset saat injeksi input (M4), dan frame Desktop Duplication beresolusi
+fisik yang tidak cocok dengan tata letak yang sudah terlanjur dikirim (M2).
+
+**Belum terverifikasi:** mesin uji pertama memakai 100% pada kedua monitornya,
+jadi jalur ini benar secara konstruksi tetapi belum pernah dibuktikan pada
+skala ≠ 100%. Bila Anda punya monitor berskala 125% atau 150%, jalankan
+`monitors` di sana — nilai `LEBAR`/`TINGGI` harus tetap resolusi **fisik**
+panel, bukan angka yang sudah diperkecil.
 
 ---
 

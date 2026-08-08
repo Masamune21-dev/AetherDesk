@@ -56,20 +56,21 @@ fn cetak_monitor() -> Result<()> {
 
     println!("\n{} monitor terdeteksi\n", monitors.len());
     println!(
-        "{:<4} {:<22} {:>7} {:>7} {:>7} {:>7}  {}",
-        "ID", "NAMA", "X", "Y", "LEBAR", "TINGGI", "PRIMER"
+        "{:<4} {:<22} {:>7} {:>7} {:>7} {:>7} {:>6}  {}",
+        "ID", "NAMA", "X", "Y", "LEBAR", "TINGGI", "SKALA", "PRIMER"
     );
-    println!("{}", "─".repeat(74));
+    println!("{}", "─".repeat(81));
 
     for m in &monitors {
         println!(
-            "{:<4} {:<22} {:>7} {:>7} {:>7} {:>7}  {}",
+            "{:<4} {:<22} {:>7} {:>7} {:>7} {:>7} {:>5}%  {}",
             m.id,
             potong(&m.name, 22),
             m.x,
             m.y,
             m.width,
             m.height,
+            m.scale_percent,
             if m.is_primary { "ya" } else { "" }
         );
     }
