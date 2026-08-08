@@ -234,17 +234,104 @@ $ curl https://aetherdesk.masamune.my.id/api/health/ready
 Regresi diperiksa ulang setelah setiap perubahan nginx: `masamune.my.id` **200**,
 `vid.masamune.my.id` **200**.
 
-### Menunggu Anda
+**14. Modul auth, device, dan Quick Connect — ditulis, belum terverifikasi build**
 
-Tidak ada.
+Ada di branch `feat/auth-quickconnect`, **bukan** `main`. Alasannya di bagian
+berikutnya. `main` sengaja dipertahankan hanya berisi commit yang sudah terbukti
+hijau.
 
-### Berikutnya dari saya
+| Berkas | Isi |
+|---|---|
+| `migrations/0002_lookup_functions.sql` | Empat fungsi `SECURITY DEFINER` untuk lookup lintas-tenant |
+| `auth/hash.rs` | Argon2id, parameter OWASP 2024 (19 MiB, t=2, p=1) |
+| `auth/jwt.rs` | JWT EdDSA sesuai ADR-008, algoritma dikunci saat verifikasi |
+| `auth/mod.rs` | Ekstraktor `Terautentikasi` |
+| `net.rs` | Ekstraktor `IpKlien` dari `X-Real-IP` |
+| `ratelimit.rs` | Batas per device ID, bukan per IP |
+| `db.rs` | Transaksi bercakupan tenant lewat `set_config` |
+| `error.rs` | Amplop respons API.md §3, error infrastruktur tidak bocor |
+| `routes/auth.rs` | bootstrap, login, me |
+| `routes/devices.rs` | daftar, daftar semua, rotasi password |
+| `routes/connect.rs` | Quick Connect |
 
-1. `rdp-api`: modul auth (Argon2id + JWT EdDSA sesuai ADR-008), device registration,
-   dan alur Quick Connect
-2. `rdp-signal`: WebSocket signaling — presence dan relay SDP/ICE
-3. Dashboard Vue 3 + agent/viewer berbasis browser
-4. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
+Tiga keputusan yang muncul saat menulis, dan alasannya:
+
+**Login sekarang wajib menyertakan `org_slug`.** Ini konsekuensi langsung T-05.
+Begitu email hanya unik per organisasi, `email + password` tidak lagi menunjuk ke
+satu orang — dua organisasi boleh punya `erik@msp.id` yang berbeda. API.md perlu
+diperbarui mengikuti ini.
+
+**Empat fungsi `SECURITY DEFINER` ditambahkan.** T-07 mengaktifkan `FORCE RLS`,
+sehingga setiap query harus tahu tenant lebih dulu — padahal saat login dan saat
+Quick Connect, tenant justru **belum** diketahui. Fungsi-fungsi ini sangat sempit:
+masing-masing hanya mengembalikan kolom minimum untuk menentukan tenant.
+
+**`periksa()` dipisah dari `catat_kegagalan()`.** Kalau digabung, percobaan yang
+sudah dijeda akan memperpanjang jedanya sendiri, dan penyerang dapat mengunci
+pemilik perangkat selamanya — pembatasan laju berubah menjadi denial of service.
+
+---
+
+## ⚠ Blocker aktif — rute jaringan ke server putus
+
+Terjadi di tengah pengerjaan, setelah commit `7693636` berhasil di-deploy.
+
+### Yang tidak terpengaruh
+
+Seluruh layanan **tetap berjalan normal**:
+
+| Endpoint | Status |
+|---|---|
+| `https://aetherdesk.masamune.my.id/api/health` | **200** |
+| `https://masamune.my.id/` | **200** |
+| `https://vid.masamune.my.id/` | **200** |
+
+`/api/health` yang menjawab 200 membuktikan `rdp-api`, PostgreSQL, dan Redis
+semuanya masih hidup. Tidak ada yang rusak, dan tidak ada data yang hilang.
+
+### Yang terpengaruh
+
+Hanya jalur SSH dari mesin pengembangan ke `192.168.99.63`.
+
+### Diagnosis
+
+| Uji | Hasil |
+|---|---|
+| SSH `:22` | timeout (3 percobaan) |
+| ICMP ke `192.168.99.63` | 100% packet loss |
+| TCP `:80` dan `:443` dari LAN | tidak merespons |
+| Gateway lokal `192.168.0.1` | **hidup**, 2/2 ping |
+| `netstat -rn \| grep 192.168.99` | **kosong — tidak ada rute** |
+| Interface `utun0`–`utun3` | up, tetapi tidak membawa rute tersebut |
+
+**Bukan** fail2ban: kalau itu penyebabnya, hanya port 22 yang terblokir, sementara
+ICMP dan port 80/443 juga mati. **Bukan** server bermasalah: ketiga situs tetap
+melayani trafik lewat internet.
+
+Kesimpulan: rute `192.168.99.0/24` hilang dari tabel routing mesin pengembangan.
+Mesin ini berada di `192.168.0.118` — subnet berbeda — sehingga aksesnya selalu
+bergantung pada rute yang kini tidak ada.
+
+### Yang perlu Anda lakukan
+
+Aktifkan kembali tunnel atau rute yang menyediakan akses ke `192.168.99.0/24`.
+Setelah itu cukup bilang "sudah", dan saya lanjutkan.
+
+### Status yang belum diketahui
+
+Perintah pembangkitan keypair JWT terputus saat timeout, jadi belum dipastikan
+apakah `env/jwt_ed25519.pem` sempat terbentuk. Skripnya idempoten (`if [ ! -s ]`),
+jadi menjalankannya ulang aman apa pun kondisinya.
+
+### Berikutnya setelah akses pulih
+
+1. Bangkitkan keypair JWT, build branch `feat/auth-quickconnect`, jalankan test
+2. Terapkan migrasi 0002, uji alur end-to-end: bootstrap → login → daftar
+   perangkat → Quick Connect
+3. Merge ke `main` setelah hijau
+4. `rdp-signal`: WebSocket signaling
+5. Dashboard Vue 3 + agent/viewer berbasis browser
+6. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
 
 ### Catatan operasional
 
