@@ -311,9 +311,68 @@ export function jelaskanKegagalan(d) {
   return `Koneksi gagal (ICE: ${d.ice}).`;
 }
 
+// ── Cangkang aplikasi ────────────────────────────────────────────────────────
+
+/**
+ * Menyisipkan header aplikasi di puncak halaman.
+ *
+ * Wordmark selalu menautkan ke beranda, sehingga setiap halaman punya jalan
+ * pulang tanpa perlu menempelkan tombol lepas di masing-masing tata letak.
+ *
+ * Tandanya dua busur yang memancar — gagasan sinyal yang menyeberang jarak.
+ * Ikon monitor akan menjadi pilihan paling mudah ditebak untuk kategori ini,
+ * dan justru itu alasannya dihindari.
+ */
+export function pasangHeader(halamanAktif = '') {
+  const tautan = [
+    ['/', 'Beranda'],
+    ['/agent', 'Agent'],
+    ['/viewer', 'Viewer'],
+  ];
+
+  const header = document.createElement('header');
+  header.className = 'app-header';
+  header.innerHTML = `
+    <a class="wordmark" href="/" aria-label="AetherDesk — beranda">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <circle cx="4" cy="14" r="1.6" fill="currentColor"/>
+        <path d="M4 9.4A4.6 4.6 0 0 1 8.6 14" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M4 4.8A9.2 9.2 0 0 1 13.2 14" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+      </svg>
+      AetherDesk
+    </a>
+    <nav class="app-nav">
+      ${tautan.map(([h, t]) =>
+        `<a href="${h}"${h === halamanAktif ? ' aria-current="page"' : ''}>${t}</a>`
+      ).join('')}
+    </nav>`;
+
+  document.body.prepend(header);
+}
+
 // ── Utilitas tampilan ────────────────────────────────────────────────────────
 
 export function $(sel) { return document.querySelector(sel); }
+
+/**
+ * Menyalin teks ke papan klip dan memberi umpan balik pada tombolnya.
+ *
+ * Device ID dan kata sandi memang dibacakan lewat telepon, tetapi cukup sering
+ * juga dikirim lewat chat — dan mengetik ulang delapan karakter acak adalah
+ * cara paling mudah membuat kesalahan.
+ */
+export async function salin(teks, tombol) {
+  const semula = tombol.textContent;
+  try {
+    await navigator.clipboard.writeText(teks);
+    tombol.textContent = 'Tersalin';
+  } catch {
+    tombol.textContent = 'Gagal menyalin';
+  }
+  setTimeout(() => { tombol.textContent = semula; }, 1600);
+}
 
 export function tampilkan(el, tampil = true) {
   el.style.display = tampil ? '' : 'none';

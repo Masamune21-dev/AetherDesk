@@ -4,53 +4,61 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>AetherDesk — Penyiapan</title>
-<link rel="stylesheet" href="/style.css?v=5">
+<title>Penyiapan — AetherDesk</title>
+<link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
 <div class="wrap">
-  <header>
+  <div class="judul-halaman">
     <div class="eyebrow">Penyiapan awal</div>
     <h1>Buat organisasi pertama</h1>
-  </header>
-
-  <p>Halaman ini hanya berfungsi selama instalasi belum memiliki organisasi.
-     Setelah organisasi pertama dibuat, endpoint-nya menolak permintaan
-     selamanya — jadi tidak ada token penyiapan yang perlu disimpan dan dirotasi.</p>
+    <p>Halaman ini hanya berfungsi selama instalasi belum memiliki organisasi.
+       Setelah yang pertama dibuat, endpoint-nya menolak permintaan selamanya —
+       jadi tidak ada token penyiapan yang perlu disimpan dan dirotasi.</p>
+  </div>
 
   <section class="card" id="kartu">
-    <div>
+    <div class="field">
       <label for="orgName">Nama organisasi</label>
       <input id="orgName" placeholder="PT Contoh Teknologi">
     </div>
-    <div>
+    <div class="field">
       <label for="slug">Slug</label>
       <input id="slug" class="mono" placeholder="contoh-teknologi">
-      <p class="status">huruf kecil, angka, dan tanda hubung</p>
+      <span class="kecil">huruf kecil, angka, dan tanda hubung</span>
     </div>
-    <div>
+    <div class="field">
       <label for="nama">Nama Anda</label>
       <input id="nama" autocomplete="name">
     </div>
-    <div>
+    <div class="field">
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username">
     </div>
-    <div>
+    <div class="field">
       <label for="sandi">Kata sandi</label>
       <input id="sandi" type="password" autocomplete="new-password">
-      <p class="status">minimal 12 karakter</p>
+      <span class="kecil">minimal 12 karakter</span>
     </div>
     <div class="baris"><button id="btnBuat">Buat organisasi</button></div>
     <p class="status" id="stat"></p>
   </section>
 
-  <section class="card" id="selesai" style="display:none">
-    <h2>Selesai</h2>
+  <section class="card" id="selesai" hidden>
+    <div class="card-head">
+      <h2>Selesai</h2>
+      <span class="badge ok">siap</span>
+    </div>
     <p>Organisasi dibuat. Lanjutkan ke salah satu halaman berikut.</p>
-    <div class="baris">
-      <button onclick="location.href='/agent'">Buka agent</button>
-      <button class="sekunder" onclick="location.href='/viewer'">Buka viewer</button>
+    <div class="nav-grid">
+      <a class="nav-card" href="/agent">
+        <span class="judul">Bagikan layar</span>
+        <span class="ket">Jadikan perangkat ini yang diakses</span>
+      </a>
+      <a class="nav-card" href="/viewer">
+        <span class="judul">Hubungkan</span>
+        <span class="ket">Akses perangkat lain</span>
+      </a>
     </div>
   </section>
 
@@ -58,7 +66,9 @@
 </div>
 
 <script type="module">
-import { api, $, tampilkan, status } from '/app.js?v=5';
+import { api, pasangHeader, $, status } from '/app.js?v=6';
+
+pasangHeader('/setup');
 
 $('#btnBuat').onclick = async () => {
   const el = $('#stat');
@@ -74,8 +84,8 @@ $('#btnBuat').onclick = async () => {
         password: $('#sandi').value,
       },
     });
-    tampilkan($('#kartu'), false);
-    tampilkan($('#selesai'), true);
+    $('#kartu').hidden = true;
+    $('#selesai').hidden = false;
   } catch (e) {
     status(el, e.status === 409
       ? 'Instalasi ini sudah memiliki organisasi. Gunakan halaman masuk.'
@@ -87,7 +97,8 @@ $('#btnBuat').onclick = async () => {
 $('#orgName').addEventListener('input', (e) => {
   const s = $('#slug');
   if (!s.dataset.disunting) {
-    s.value = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 100);
+    s.value = e.target.value.toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 100);
   }
 });
 $('#slug').addEventListener('input', (e) => { e.target.dataset.disunting = '1'; });

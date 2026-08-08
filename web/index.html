@@ -4,84 +4,93 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>AetherDesk — Fase 0</title>
-<link rel="stylesheet" href="/style.css?v=5">
-<style>
-  .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;
-       padding:.7rem 0;border-bottom:1px solid var(--line-soft)}
-  .row:last-child{border-bottom:0}
-  .name{font-family:var(--mono);font-size:.85rem}
-  .note{font-size:.78rem;color:var(--dim);margin-top:.15rem}
-  .badge{font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;
-         text-transform:uppercase;padding:.22rem .5rem;border:1px solid currentColor;
-         white-space:nowrap}
-  .badge.ok{color:var(--ok)} .badge.bad{color:var(--bad)} .badge.wait{color:var(--wait)}
-  .nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem}
-  .nav a{display:block;padding:.85rem 1rem;background:var(--bg);border:1px solid var(--line);
-         color:var(--ink);text-decoration:none;border-radius:2px}
-  .nav a:hover{border-color:var(--accent)}
-  .nav .judul{font-weight:650;font-size:.95rem}
-  .nav .ket{font-size:.78rem;color:var(--dim);margin-top:.2rem}
-</style>
+<title>AetherDesk</title>
+<link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
 <div class="wrap">
-  <header>
+  <div class="judul-halaman">
     <div class="eyebrow">Fase 0 · Control Plane</div>
-    <h1>AetherDesk</h1>
-  </header>
+    <h1>Akses jarak jauh, tanpa memasang apa pun</h1>
+    <p>Bagikan layar dari satu browser, sambungkan dari browser lain memakai
+       Device ID dan kata sandi sekali pakai.</p>
+  </div>
 
   <section class="card">
-    <h2>Coba sekarang</h2>
-    <div class="nav">
-      <a href="/setup">
-        <div class="judul">Penyiapan</div>
-        <div class="ket">Buat organisasi pertama</div>
+    <h2>Mulai</h2>
+    <div class="nav-grid">
+      <a class="nav-card" href="/agent">
+        <span class="judul">Bagikan layar</span>
+        <span class="ket">Jadikan perangkat ini yang diakses</span>
       </a>
-      <a href="/agent">
-        <div class="judul">Agent</div>
-        <div class="ket">Bagikan layar perangkat ini</div>
+      <a class="nav-card" href="/viewer">
+        <span class="judul">Hubungkan</span>
+        <span class="ket">Akses perangkat lain lewat Device ID</span>
       </a>
-      <a href="/viewer">
-        <div class="judul">Viewer</div>
-        <div class="ket">Hubungkan lewat Device ID</div>
+      <a class="nav-card" href="/setup">
+        <span class="judul">Penyiapan</span>
+        <span class="ket">Buat organisasi pertama</span>
       </a>
     </div>
-    <p>Buka <b>Agent</b> di satu tab dan <b>Viewer</b> di tab lain, lalu masukkan
-       Device ID beserta kata sandi sesi yang ditampilkan agent.</p>
+    <p class="kecil">Buka <b>Bagikan layar</b> di satu perangkat dan
+       <b>Hubungkan</b> di perangkat lain. Kata sandi sesi berganti setiap kali
+       sesi berakhir.</p>
   </section>
 
   <section class="card">
-    <h2>Status layanan</h2>
-    <div class="row" data-probe="http" data-path="/nginx-health">
-      <div><div class="name">nginx</div><div class="note">TLS, routing, aset statis</div></div>
-      <span class="badge wait">cek…</span>
+    <div class="card-head">
+      <h2>Status layanan</h2>
+      <span class="badge netral" id="ringkas">memeriksa…</span>
     </div>
-    <div class="row" data-probe="http" data-path="/api/health/ready">
-      <div><div class="name">rdp-api</div><div class="note">REST · auth, perangkat, Quick Connect</div></div>
-      <span class="badge wait">cek…</span>
-    </div>
-    <div class="row" data-probe="ws" data-path="/ws">
-      <div><div class="name">rdp-signal</div><div class="note">WebSocket · signaling, presence</div></div>
-      <span class="badge wait">cek…</span>
-    </div>
-    <div class="row">
-      <div><div class="name">postgres</div><div class="note">metadata persisten</div></div>
-      <span class="badge wait" id="pg">cek…</span>
-    </div>
-    <div class="row">
-      <div><div class="name">redis</div><div class="note">presence, pembatasan laju</div></div>
-      <span class="badge wait" id="rd">cek…</span>
+    <div class="rows">
+      <div class="row" data-probe="http" data-path="/nginx-health">
+        <div>
+          <div class="nama">nginx</div>
+          <div class="ket">TLS, routing, aset statis</div>
+        </div>
+        <span class="badge netral">cek…</span>
+      </div>
+      <div class="row" data-probe="http" data-path="/api/health/ready">
+        <div>
+          <div class="nama">rdp-api</div>
+          <div class="ket">REST · auth, perangkat, Quick Connect</div>
+        </div>
+        <span class="badge netral">cek…</span>
+      </div>
+      <div class="row" data-probe="ws" data-path="/ws">
+        <div>
+          <div class="nama">rdp-signal</div>
+          <div class="ket">WebSocket · signaling, presence</div>
+        </div>
+        <span class="badge netral">cek…</span>
+      </div>
+      <div class="row">
+        <div>
+          <div class="nama">postgres</div>
+          <div class="ket">metadata persisten</div>
+        </div>
+        <span class="badge netral" id="pg">cek…</span>
+      </div>
+      <div class="row">
+        <div>
+          <div class="nama">redis</div>
+          <div class="ket">presence, pembatasan laju</div>
+        </div>
+        <span class="badge netral" id="rd">cek…</span>
+      </div>
     </div>
   </section>
 
   <footer>
     aetherdesk.masamune.my.id<br>
-    github.com/Masamune21-dev/AetherDesk
+    <a href="https://github.com/Masamune21-dev/AetherDesk">github.com/Masamune21-dev/AetherDesk</a>
   </footer>
 </div>
 
 <script type="module">
+import { pasangHeader } from '/app.js?v=6';
+pasangHeader('/');
+
 const set = (el, kelas, teks) => { el.className = 'badge ' + kelas; el.textContent = teks; };
 
 async function probeHttp(row) {
@@ -94,11 +103,11 @@ async function probeHttp(row) {
         const d = await r.json();
         for (const c of d.checks ?? []) {
           const el = document.getElementById(c.name === 'postgres' ? 'pg' : 'rd');
-          if (el) set(el, c.ok ? 'ok' : 'bad', c.ok ? `aktif · ${c.latency_ms} ms` : 'gagal');
+          if (el) set(el, c.ok ? 'ok' : 'bad', c.ok ? `${c.latency_ms} ms` : 'gagal');
         }
       }
     } else if (r.status === 502 || r.status === 503) {
-      set(badge, 'wait', 'belum dipasang');
+      set(badge, 'wait', 'belum aktif');
     } else {
       set(badge, 'bad', 'HTTP ' + r.status);
     }
@@ -117,25 +126,34 @@ function probeWs(row) {
     const batas = setTimeout(() => {
       if (!selesai) { selesai = true; ws.close(); set(badge, 'bad', 'timeout'); }
     }, 4000);
-    ws.onopen = () => {
+    const tutup = (kelas, teks) => {
       if (selesai) return;
       selesai = true; clearTimeout(batas);
-      set(badge, 'ok', 'aktif');
-      ws.close();
+      set(badge, kelas, teks);
     };
-    ws.onerror = () => {
-      if (selesai) return;
-      selesai = true; clearTimeout(batas);
-      set(badge, 'wait', 'belum dipasang');
-    };
+    ws.onopen = () => { tutup('ok', 'aktif'); ws.close(); };
+    ws.onerror = () => tutup('wait', 'belum aktif');
   } catch { set(badge, 'bad', 'tak terjangkau'); }
+}
+
+function ringkas() {
+  const semua = [...document.querySelectorAll('.rows .badge')];
+  if (semua.some((b) => b.classList.contains('netral'))) return;
+  const buruk = semua.filter((b) => b.classList.contains('bad')).length;
+  const nunggu = semua.filter((b) => b.classList.contains('wait')).length;
+  const el = document.getElementById('ringkas');
+  if (buruk) set(el, 'bad', `${buruk} bermasalah`);
+  else if (nunggu) set(el, 'wait', `${nunggu} belum aktif`);
+  else set(el, 'ok', 'semua sehat');
 }
 
 function tick() {
   document.querySelectorAll('[data-probe="http"]').forEach(probeHttp);
   document.querySelectorAll('[data-probe="ws"]').forEach(probeWs);
+  setTimeout(ringkas, 1200);
 }
-tick(); setInterval(tick, 5000);
+tick();
+setInterval(tick, 5000);
 </script>
 </body>
 </html>

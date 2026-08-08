@@ -4,28 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>AetherDesk — Viewer</title>
-<link rel="stylesheet" href="/style.css?v=5">
+<title>Hubungkan — AetherDesk</title>
+<link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
 <div class="wrap lebar">
-  <header>
+  <div class="judul-halaman">
     <div class="eyebrow">Viewer · Quick Connect</div>
     <h1>Hubungkan ke perangkat</h1>
-  </header>
+  </div>
 
   <!-- ── Masuk ────────────────────────────────────────────────────────────── -->
-  <section class="card" id="kartuMasuk">
+  <section class="card" id="kartuMasuk" style="max-width:34rem">
     <h2>Masuk</h2>
-    <div>
+    <div class="field">
       <label for="slug">Organisasi</label>
       <input id="slug" class="mono" placeholder="nama-organisasi" autocomplete="organization">
     </div>
-    <div>
+    <div class="field">
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username">
     </div>
-    <div>
+    <div class="field">
       <label for="sandi">Kata sandi</label>
       <input id="sandi" type="password" autocomplete="current-password">
     </div>
@@ -34,13 +34,15 @@
   </section>
 
   <!-- ── Quick Connect ────────────────────────────────────────────────────── -->
-  <section class="card" id="kartuConnect" style="display:none">
+  <section class="card" id="kartuConnect" hidden style="max-width:34rem">
     <h2>Quick Connect</h2>
-    <div>
+    <p class="kecil">Masukkan Device ID dan kata sandi yang ditampilkan pada
+       perangkat yang akan diakses.</p>
+    <div class="field">
       <label for="devId">Device ID</label>
       <input id="devId" class="mono" inputmode="numeric" placeholder="942 716 382" maxlength="11">
     </div>
-    <div>
+    <div class="field">
       <label for="devSandi">Kata sandi sesi</label>
       <input id="devSandi" class="mono" placeholder="8 karakter" maxlength="8" autocapitalize="characters">
     </div>
@@ -49,39 +51,53 @@
   </section>
 
   <!-- ── Sesi ─────────────────────────────────────────────────────────────── -->
-  <section class="card" id="kartuSesi" style="display:none">
-    <h2>Sesi aktif</h2>
-    <video id="layar" autoplay playsinline></video>
-    <div class="hud" id="hud">
-      <span>Koneksi: <b id="hKoneksi">—</b></span>
-      <span>Latensi: <b id="hRtt">—</b></span>
-      <span>FPS: <b id="hFps">—</b></span>
-      <span>Resolusi: <b id="hRes">—</b></span>
-      <span>Bitrate: <b id="hBitrate">—</b></span>
-      <span>Jalur: <b id="hJalur">—</b></span>
+  <section class="card" id="kartuSesi" hidden>
+    <div class="card-head">
+      <h2>Sesi aktif</h2>
+      <span class="badge wait" id="lencanaSesi">menghubungkan</span>
     </div>
-    <div class="baris">
-      <button id="btnPutus" class="bahaya">Akhiri sesi</button>
+
+    <div class="panggung">
+      <video id="layar" autoplay playsinline></video>
+      <div class="hud" id="hud">
+        <div><span>Latensi</span><b id="hRtt">—</b></div>
+        <div><span>FPS</span><b id="hFps">—</b></div>
+        <div><span>Resolusi</span><b id="hRes">—</b></div>
+        <div><span>Bitrate</span><b id="hBitrate">—</b></div>
+        <div><span>Jalur</span><b id="hJalur">—</b></div>
+      </div>
+    </div>
+
+    <div class="baris rapat">
       <button id="btnLayarPenuh" class="sekunder">Layar penuh</button>
+      <button id="btnHud" class="sekunder">Sembunyikan statistik</button>
+      <button id="btnPutus" class="bahaya">Akhiri sesi</button>
     </div>
     <p class="status" id="statusSesi"></p>
   </section>
 
-  <footer>
-    aetherdesk.masamune.my.id · <a href="/agent" style="color:var(--accent)">buka agent</a>
-  </footer>
+  <footer>aetherdesk.masamune.my.id</footer>
 </div>
 
 <script type="module">
 import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
-         Signal, Kanal, jelaskanKegagalan, $, tampilkan, status, statistik }
-  from '/app.js?v=5';
+         Signal, Kanal, jelaskanKegagalan, pasangHeader,
+         $, status, statistik } from '/app.js?v=6';
+
+pasangHeader('/viewer');
 
 let signal = null;
 let kanal = null;
 let sessionId = null;
 let timerHud = null;
 let bytesTerakhir = 0, waktuTerakhir = 0;
+
+const tampil = (el, ya = true) => { el.hidden = !ya; };
+const lencana = (kelas, teks) => {
+  const el = $('#lencanaSesi');
+  el.className = 'badge ' + kelas;
+  el.textContent = teks;
+};
 
 // ── Masuk ────────────────────────────────────────────────────────────────────
 $('#btnMasuk').onclick = async () => {
@@ -90,11 +106,15 @@ $('#btnMasuk').onclick = async () => {
   try {
     const r = await api('/v1/auth/login', {
       method: 'POST',
-      body: { org_slug: $('#slug').value.trim(), email: $('#email').value.trim(), password: $('#sandi').value },
+      body: {
+        org_slug: $('#slug').value.trim(),
+        email: $('#email').value.trim(),
+        password: $('#sandi').value,
+      },
     });
     simpanToken(r.access_token, r.refresh_token);
-    tampilkan($('#kartuMasuk'), false);
-    tampilkan($('#kartuConnect'), true);
+    tampil($('#kartuMasuk'), false);
+    tampil($('#kartuConnect'), true);
   } catch (e) { status(el, e.message, 'bad'); }
 };
 
@@ -119,9 +139,7 @@ $('#btnHubungkan').onclick = async () => {
   sessionId = sesi.session_id;
   status(el, 'menunggu persetujuan di perangkat tujuan…', 'wait');
 
-  const akses = await aksesSegar();
-  if (!akses) return;
-  signal = new Signal(akses, null);
+  signal = new Signal(await aksesSegar(), null);
 
   signal.addEventListener('SESSION_ACCEPTED', () =>
     status(el, 'disetujui — menegosiasikan media…', 'wait'));
@@ -138,20 +156,23 @@ $('#btnHubungkan').onclick = async () => {
   kanal = await Kanal.buat({
     onKandidat: (c) => signal.kirim('ICE_CANDIDATE', { session_id: sessionId, candidate: c }),
     onStatus: (s, d) => {
-      $('#hKoneksi').textContent = s;
       if (s === 'failed') {
+        lencana('bad', 'gagal');
         status($('#statusSesi'), jelaskanKegagalan(d), 'bad');
         console.warn('diagnosa viewer', d);
+      } else if (s === 'connected') {
+        lencana('ok', 'tersambung');
+        status($('#statusSesi'), '', 'ok');
       } else {
-        status($('#statusSesi'), `sesi: ${s}`, s === 'connected' ? 'ok' : 'wait');
+        lencana('wait', s);
       }
     },
   });
 
   kanal.pc.ontrack = (e) => {
     $('#layar').srcObject = e.streams[0];
-    tampilkan($('#kartuConnect'), false);
-    tampilkan($('#kartuSesi'), true);
+    tampil($('#kartuConnect'), false);
+    tampil($('#kartuSesi'), true);
     mulaiHud();
   };
 
@@ -186,7 +207,7 @@ function mulaiHud() {
     if (!kanal) return;
     const s = await statistik(kanal.pc);
     const d = kanal.diagnosa();
-    $('#hJalur').textContent = d.punyaRelay ? 'relay' : d.punyaSrflx ? 'P2P (srflx)' : 'P2P (host)';
+    $('#hJalur').textContent = d.punyaRelay ? 'relay' : d.punyaSrflx ? 'srflx' : 'host';
     $('#hRtt').textContent = s.rtt != null ? `${s.rtt} ms` : '—';
     $('#hFps').textContent = s.fps != null ? Math.round(s.fps) : '—';
     $('#hRes').textContent = s.lebar ? `${s.lebar}×${s.tinggi}` : '—';
@@ -202,7 +223,13 @@ function mulaiHud() {
 }
 
 // ── Kontrol ──────────────────────────────────────────────────────────────────
-$('#btnLayarPenuh').onclick = () => $('#layar').requestFullscreen?.();
+$('#btnLayarPenuh').onclick = () => document.querySelector('.panggung').requestFullscreen?.();
+
+$('#btnHud').onclick = (e) => {
+  const hud = $('#hud');
+  hud.hidden = !hud.hidden;
+  e.target.textContent = hud.hidden ? 'Tampilkan statistik' : 'Sembunyikan statistik';
+};
 
 $('#btnPutus').onclick = () => {
   if (signal && sessionId) signal.kirim('SESSION_END', { session_id: sessionId });
@@ -216,21 +243,19 @@ function bersihkan() {
   signal?.tutup(); signal = null;
   sessionId = null;
   $('#layar').srcObject = null;
-  tampilkan($('#kartuSesi'), false);
-  tampilkan($('#kartuConnect'), true);
+  tampil($('#kartuSesi'), false);
+  tampil($('#kartuConnect'), true);
 }
 
-// Sesi dianggap ada hanya bila access token belum kedaluwarsa, atau masih
-// tersedia refresh token untuk memulihkannya.
 saatSesiHabis(() => {
   hapusToken();
   bersihkan();
-  tampilkan($('#kartuConnect'), false);
-  tampilkan($('#kartuMasuk'), true);
+  tampil($('#kartuConnect'), false);
+  tampil($('#kartuMasuk'), true);
   status($('#statusMasuk'), 'Sesi Anda berakhir. Silakan masuk lagi.', 'wait');
 });
 
-if (adaSesi()) { tampilkan($('#kartuMasuk'), false); tampilkan($('#kartuConnect'), true); }
+if (adaSesi()) { tampil($('#kartuMasuk'), false); tampil($('#kartuConnect'), true); }
 </script>
 </body>
 </html>
