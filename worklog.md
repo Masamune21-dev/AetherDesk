@@ -234,17 +234,187 @@ $ curl https://aetherdesk.masamune.my.id/api/health/ready
 Regresi diperiksa ulang setelah setiap perubahan nginx: `masamune.my.id` **200**,
 `vid.masamune.my.id` **200**.
 
-### Menunggu Anda
+**14. Modul auth, device, dan Quick Connect — ditulis, belum terverifikasi build**
 
-Tidak ada.
+Ada di branch `feat/auth-quickconnect`, **bukan** `main`. Alasannya di bagian
+berikutnya. `main` sengaja dipertahankan hanya berisi commit yang sudah terbukti
+hijau.
 
-### Berikutnya dari saya
+| Berkas | Isi |
+|---|---|
+| `migrations/0002_lookup_functions.sql` | Empat fungsi `SECURITY DEFINER` untuk lookup lintas-tenant |
+| `auth/hash.rs` | Argon2id, parameter OWASP 2024 (19 MiB, t=2, p=1) |
+| `auth/jwt.rs` | JWT EdDSA sesuai ADR-008, algoritma dikunci saat verifikasi |
+| `auth/mod.rs` | Ekstraktor `Terautentikasi` |
+| `net.rs` | Ekstraktor `IpKlien` dari `X-Real-IP` |
+| `ratelimit.rs` | Batas per device ID, bukan per IP |
+| `db.rs` | Transaksi bercakupan tenant lewat `set_config` |
+| `error.rs` | Amplop respons API.md §3, error infrastruktur tidak bocor |
+| `routes/auth.rs` | bootstrap, login, me |
+| `routes/devices.rs` | daftar, daftar semua, rotasi password |
+| `routes/connect.rs` | Quick Connect |
 
-1. `rdp-api`: modul auth (Argon2id + JWT EdDSA sesuai ADR-008), device registration,
-   dan alur Quick Connect
-2. `rdp-signal`: WebSocket signaling — presence dan relay SDP/ICE
-3. Dashboard Vue 3 + agent/viewer berbasis browser
-4. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
+Tiga keputusan yang muncul saat menulis, dan alasannya:
+
+**Login sekarang wajib menyertakan `org_slug`.** Ini konsekuensi langsung T-05.
+Begitu email hanya unik per organisasi, `email + password` tidak lagi menunjuk ke
+satu orang — dua organisasi boleh punya `erik@msp.id` yang berbeda. API.md perlu
+diperbarui mengikuti ini.
+
+**Empat fungsi `SECURITY DEFINER` ditambahkan.** T-07 mengaktifkan `FORCE RLS`,
+sehingga setiap query harus tahu tenant lebih dulu — padahal saat login dan saat
+Quick Connect, tenant justru **belum** diketahui. Fungsi-fungsi ini sangat sempit:
+masing-masing hanya mengembalikan kolom minimum untuk menentukan tenant.
+
+**`periksa()` dipisah dari `catat_kegagalan()`.** Kalau digabung, percobaan yang
+sudah dijeda akan memperpanjang jedanya sendiri, dan penyerang dapat mengunci
+pemilik perangkat selamanya — pembatasan laju berubah menjadi denial of service.
+
+---
+
+**15. Blocker jaringan teratasi — akses lewat IP publik**
+
+Solusinya sederhana: SSH langsung ke `root@103.189.249.88`.
+
+Penemuan yang menjelaskan banyak hal sebelumnya: `hostname -I` menunjukkan box
+ini punya **tiga alamat sekaligus** — `192.168.99.63`, `103.189.249.83`, dan
+`103.189.249.88`. Bukan NAT, melainkan IP publik yang terikat langsung ke host.
+Itulah sebabnya `.83` dan `.88` sama-sama bekerja, dan kenapa kekhawatiran awal
+tentang `.88` yang "usang" memang tidak berdasar.
+
+Catatan sampingan: `load average` sempat terbaca 5,26 pada box 4-core, tetapi
+CPU justru 85,7% idle dengan RAM 1,8 GB bebas. Itu artefak LXC — `/proc/loadavg`
+di dalam container menampilkan beban **host Proxmox**, bukan container. Bukan
+masalah.
+
+**16. Tiga bug ditemukan uji end-to-end**
+
+| # | Bug | Sebab |
+|---|---|---|
+| 1 | Build gagal: `IpAddr` tidak dapat di-bind | `sqlx` tidak memetakan `IpAddr` ke `INET` tanpa fitur `ipnetwork`. Diperbaiki dengan cast `$2::inet` di SQL — lebih ringan daripada menambah dependensi. |
+| 2 | Test gagal kompilasi: `start_paused` tidak dikenal | Fitur `test-util` tokio tidak termasuk dalam `full`. Ditambahkan sebagai dev-dependency. |
+| 3 | **Login selalu 401 meski kredensial benar** | Lihat di bawah — ini yang paling penting. |
+
+**Bug ketiga layak dicatat khusus.** `FORCE ROW LEVEL SECURITY` berlaku pada
+pemilik tabel **termasuk di dalam fungsi `SECURITY DEFINER` yang dimiliki role
+yang sama**. `resolve_login` berjalan sebagai `aetherdesk`, tetap terkena RLS,
+dan karena tenant memang belum diketahui saat login, policy menyaring seluruh
+baris. Fungsi mengembalikan nol baris dan pemanggil menyimpulkan password salah.
+
+Pelajarannya: **`SECURITY DEFINER` bukan mekanisme bypass RLS.** Yang mem-bypass
+RLS adalah atribut `BYPASSRLS` pada role, atau status superuser.
+
+`migrations/0003_lookup_bypass_role.sql` memperbaikinya dengan role khusus
+`aetherdesk_lookup` (`NOLOGIN BYPASSRLS`) sebagai pemilik keempat fungsi.
+Sengaja **bukan** `postgres`: menjadikan superuser pemilik fungsi
+`SECURITY DEFINER` berarti setiap cacat di dalamnya berakibat kompromi total.
+
+Pemisahan role akhirnya menjadi:
+
+| Role | Login | BYPASSRLS | Peran |
+|---|---|---|---|
+| `aetherdesk` | ya | **tidak** | runtime aplikasi, tunduk pada RLS |
+| `aetherdesk_app` | tidak | tidak | disiapkan untuk pemisahan lebih lanjut |
+| `aetherdesk_lookup` | tidak | **ya** | hanya memiliki empat fungsi lookup |
+
+**17. Uji end-to-end — 26 dari 26 lulus**
+
+`scripts/e2e.sh` menjalankan alur penuh sekaligus memverifikasi properti keamanan
+yang mudah hilang saat refactor:
+
+```
+1. Kesehatan          liveness, readiness
+2. Bootstrap          organisasi pertama, slug tidak valid ditolak
+3. Login              password salah, org tidak dikenal, login berhasil
+4. Autentikasi        tanpa token, token sampah, token sah
+5. Perangkat          device ID 9 digit, password 8 karakter dari alfabet benar
+6. Quick Connect      check digit, respons seragam, lantai waktu 304 ms,
+                      kredensial benar, normalisasi huruf kecil
+7. Pembatasan laju    5 kegagalan menjeda, kredensial benar pun ditolak,
+                      jeda tidak merembet ke perangkat lain
+```
+
+Pembatasan laju diverifikasi secara perilaku, bukan sekadar "request terkirim":
+setelah lima password salah, **password yang benar pun ditolak**, dan `throttled`
+tercatat di `quick_connect_attempts`.
+
+Satu subtlety yang ditemukan dan diterima: lantai waktu respons hanya berlaku
+pada badan handler, bukan pada penolakan di ekstraktor autentikasi. Ini tidak
+merugikan — request tanpa token tidak pernah menyentuh data perangkat, jadi tidak
+ada yang bisa dibocorkan lewat selisih waktunya.
+
+**18. Header JWT terverifikasi**
+
+```json
+{"typ":"JWT","alg":"EdDSA"}
+```
+
+ADR-008 terpenuhi di tingkat wire, bukan hanya di dokumen.
+
+---
+
+## ~~Blocker~~ — rute jaringan ke server putus (SELESAI)
+
+> Teratasi pada butir 15. Dipertahankan sebagai catatan diagnosis.
+
+Terjadi di tengah pengerjaan, setelah commit `7693636` berhasil di-deploy.
+
+### Yang tidak terpengaruh
+
+Seluruh layanan **tetap berjalan normal**:
+
+| Endpoint | Status |
+|---|---|
+| `https://aetherdesk.masamune.my.id/api/health` | **200** |
+| `https://masamune.my.id/` | **200** |
+| `https://vid.masamune.my.id/` | **200** |
+
+`/api/health` yang menjawab 200 membuktikan `rdp-api`, PostgreSQL, dan Redis
+semuanya masih hidup. Tidak ada yang rusak, dan tidak ada data yang hilang.
+
+### Yang terpengaruh
+
+Hanya jalur SSH dari mesin pengembangan ke `192.168.99.63`.
+
+### Diagnosis
+
+| Uji | Hasil |
+|---|---|
+| SSH `:22` | timeout (3 percobaan) |
+| ICMP ke `192.168.99.63` | 100% packet loss |
+| TCP `:80` dan `:443` dari LAN | tidak merespons |
+| Gateway lokal `192.168.0.1` | **hidup**, 2/2 ping |
+| `netstat -rn \| grep 192.168.99` | **kosong — tidak ada rute** |
+| Interface `utun0`–`utun3` | up, tetapi tidak membawa rute tersebut |
+
+**Bukan** fail2ban: kalau itu penyebabnya, hanya port 22 yang terblokir, sementara
+ICMP dan port 80/443 juga mati. **Bukan** server bermasalah: ketiga situs tetap
+melayani trafik lewat internet.
+
+Kesimpulan: rute `192.168.99.0/24` hilang dari tabel routing mesin pengembangan.
+Mesin ini berada di `192.168.0.118` — subnet berbeda — sehingga aksesnya selalu
+bergantung pada rute yang kini tidak ada.
+
+### Yang perlu Anda lakukan
+
+Aktifkan kembali tunnel atau rute yang menyediakan akses ke `192.168.99.0/24`.
+Setelah itu cukup bilang "sudah", dan saya lanjutkan.
+
+### Status yang belum diketahui
+
+Perintah pembangkitan keypair JWT terputus saat timeout, jadi belum dipastikan
+apakah `env/jwt_ed25519.pem` sempat terbentuk. Skripnya idempoten (`if [ ! -s ]`),
+jadi menjalankannya ulang aman apa pun kondisinya.
+
+### Berikutnya setelah akses pulih
+
+1. Bangkitkan keypair JWT, build branch `feat/auth-quickconnect`, jalankan test
+2. Terapkan migrasi 0002, uji alur end-to-end: bootstrap → login → daftar
+   perangkat → Quick Connect
+3. Merge ke `main` setelah hijau
+4. `rdp-signal`: WebSocket signaling
+5. Dashboard Vue 3 + agent/viewer berbasis browser
+6. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
 
 ### Catatan operasional
 
