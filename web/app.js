@@ -114,6 +114,93 @@ export function buatPeer() {
   return new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' });
 }
 
+/**
+ * Pembungkus RTCPeerConnection yang mengantre kandidat ICE.
+ *
+ * Trickle ICE mengirim kandidat segera setelah `setLocalDescription`, jauh
+ * sebelum lawan sempat membuat peer connection-nya sendiri — apalagi sebelum
+ * `setRemoteDescription` dipanggil. Kandidat yang tiba pada jeda itu akan
+ * ditolak dan hilang tanpa jejak, dan koneksi berakhir `failed` meskipun
+ * signaling-nya sempurna.
+ *
+ * Kelas ini menahan kandidat sampai remote description siap, lalu menyiramkan
+ * seluruh antrean sekaligus.
+ */
+export class Kanal {
+  constructor({ onKandidat, onStatus }) {
+    this.pc = buatPeer();
+    this.remoteSiap = false;
+    this.antre = [];
+    this.kandidatLokal = [];
+
+    this.pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        this.kandidatLokal.push(e.candidate.type ?? '?');
+        onKandidat?.(e.candidate.toJSON());
+      }
+    };
+    this.pc.onconnectionstatechange = () => onStatus?.(this.pc.connectionState, this.diagnosa());
+    this.pc.oniceconnectionstatechange = () =>
+      onStatus?.(this.pc.connectionState, this.diagnosa());
+  }
+
+  async terapkanRemote(type, sdp) {
+    await this.pc.setRemoteDescription({ type, sdp });
+    this.remoteSiap = true;
+
+    // Siram antrean. Kandidat basi wajar ditolak — jangan sampai satu
+    // kegagalan menghentikan sisanya.
+    for (const c of this.antre) {
+      try { await this.pc.addIceCandidate(c); }
+      catch (e) { console.warn('kandidat antrean ditolak', e.message); }
+    }
+    this.antre = [];
+  }
+
+  async tambahKandidat(c) {
+    if (!c) return;
+    if (!this.remoteSiap) { this.antre.push(c); return; }
+    try { await this.pc.addIceCandidate(c); }
+    catch (e) { console.warn('kandidat ditolak', e.message); }
+  }
+
+  /** Ringkasan untuk menjelaskan kegagalan, bukan sekadar melaporkannya. */
+  diagnosa() {
+    const jenis = [...new Set(this.kandidatLokal)];
+    return {
+      ice: this.pc.iceConnectionState,
+      gathering: this.pc.iceGatheringState,
+      koneksi: this.pc.connectionState,
+      kandidat: jenis,
+      antre: this.antre.length,
+      // `host` saja berarti STUN tidak terjangkau; tanpa `srflx` koneksi
+      // lintas-NAT mustahil.
+      punyaSrflx: jenis.includes('srflx'),
+      punyaRelay: jenis.includes('relay'),
+    };
+  }
+
+  tutup() { try { this.pc.close(); } catch { /* sudah tertutup */ } }
+}
+
+/** Menjelaskan kegagalan koneksi dalam bahasa yang bisa ditindaklanjuti. */
+export function jelaskanKegagalan(d) {
+  if (!d) return 'Koneksi gagal.';
+  if (d.kandidat.length === 0) {
+    return 'Koneksi gagal: browser tidak menghasilkan satu pun kandidat ICE. '
+         + 'Biasanya karena halaman tidak berjalan di konteks aman atau WebRTC diblokir.';
+  }
+  if (!d.punyaSrflx && !d.punyaRelay) {
+    return 'Koneksi gagal: hanya kandidat host yang ditemukan, server STUN tidak terjangkau. '
+         + 'Jaringan Anda kemungkinan memblokir UDP keluar ke port 19302.';
+  }
+  if (!d.punyaRelay) {
+    return 'Koneksi P2P gagal meski STUN bekerja. Ini pola khas Symmetric NAT, '
+         + 'dan menembusnya memerlukan server TURN yang belum dipasang pada Fase 0.';
+  }
+  return `Koneksi gagal (ICE: ${d.ice}).`;
+}
+
 // ── Utilitas tampilan ────────────────────────────────────────────────────────
 
 export function $(sel) { return document.querySelector(sel); }

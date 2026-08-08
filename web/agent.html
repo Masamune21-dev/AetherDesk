@@ -95,8 +95,8 @@
 </dialog>
 
 <script type="module">
-import { api, simpanToken, ambilToken, Signal, buatPeer, $, tampilkan, status, kelompokkan }
-  from '/app.js';
+import { api, simpanToken, ambilToken, Signal, Kanal, jelaskanKegagalan,
+         $, tampilkan, status, kelompokkan } from '/app.js';
 
 let token = ambilToken();
 let device = null;      // { device_uuid, device_id, session_password }
@@ -171,15 +171,16 @@ $('#btnBagikan').onclick = async () => {
   signal = new Signal(token, device.device_uuid);
 
   signal.addEventListener('SESSION_OFFER', (ev) => tanyaPersetujuan(ev.detail));
+
   signal.addEventListener('SDP_ANSWER', async (ev) => {
-    const pc = peer.get(ev.detail.session_id);
-    if (pc) await pc.setRemoteDescription({ type: 'answer', sdp: ev.detail.sdp });
+    const k = peer.get(ev.detail.session_id);
+    if (k) await k.terapkanRemote('answer', ev.detail.sdp);
   });
+
   signal.addEventListener('ICE_CANDIDATE', async (ev) => {
-    const pc = peer.get(ev.detail.session_id);
-    if (pc && ev.detail.candidate) {
-      try { await pc.addIceCandidate(ev.detail.candidate); } catch { /* kandidat basi */ }
-    }
+    const k = peer.get(ev.detail.session_id);
+    // Kanal mengantre sendiri bila remote description belum siap.
+    if (k) await k.tambahKandidat(ev.detail.candidate);
   });
   signal.addEventListener('SESSION_END', (ev) => tutupSesi(ev.detail.session_id));
   signal.addEventListener('TERPUTUS', () => status(el, 'signaling terputus', 'bad'));
@@ -243,33 +244,36 @@ $('#btnIzinkan').onclick = async () => {
   // Agent adalah pihak yang menawarkan SDP. Ini menyelesaikan kontradiksi
   // T-10: ARCHITECTURE.md §7.1 dan API.md §9 menempatkan agent sebagai
   // offerer, sementara §8.1 menempatkan viewer. Yang dipakai: agent.
-  const pc = buatPeer();
-  peer.set(sid, pc);
+  const kanal = new Kanal({
+    onKandidat: (c) => signal.kirim('ICE_CANDIDATE', { session_id: sid, candidate: c }),
+    onStatus: (s, d) => {
+      if (s === 'failed') {
+        status($('#statusAgent'), jelaskanKegagalan(d), 'bad');
+        console.warn('diagnosa agent', d);
+        tutupSesi(sid);
+      } else {
+        status($('#statusAgent'), `sesi: ${s}`, s === 'connected' ? 'ok' : 'wait');
+        if (s === 'closed') tutupSesi(sid);
+      }
+    },
+  });
+  peer.set(sid, kanal);
 
-  stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+  stream.getTracks().forEach((t) => kanal.pc.addTrack(t, stream));
 
-  pc.onicecandidate = (e) => {
-    if (e.candidate) signal.kirim('ICE_CANDIDATE', { session_id: sid, candidate: e.candidate.toJSON() });
-  };
-  pc.onconnectionstatechange = () => {
-    const s = pc.connectionState;
-    status($('#statusAgent'), `sesi: ${s}`, s === 'connected' ? 'ok' : s === 'failed' ? 'bad' : 'wait');
-    if (s === 'failed' || s === 'closed') tutupSesi(sid);
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  const offer = await kanal.pc.createOffer();
+  await kanal.pc.setLocalDescription(offer);
   signal.kirim('SDP_OFFER', { session_id: sid, sdp: offer.sdp });
 };
 
 function tutupSesi(sid) {
-  const pc = peer.get(sid);
-  if (pc) { pc.close(); peer.delete(sid); }
+  const k = peer.get(sid);
+  if (k) { k.tutup(); peer.delete(sid); }
   if (peer.size === 0) status($('#statusAgent'), 'siap menerima koneksi', 'ok');
 }
 
 function hentikan() {
-  peer.forEach((pc, sid) => { signal?.kirim('SESSION_END', { session_id: sid }); pc.close(); });
+  peer.forEach((k, sid) => { signal?.kirim('SESSION_END', { session_id: sid }); k.tutup(); });
   peer.clear();
   stream?.getTracks().forEach((t) => t.stop());
   signal?.tutup();

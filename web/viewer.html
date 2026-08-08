@@ -58,6 +58,7 @@
       <span>FPS: <b id="hFps">—</b></span>
       <span>Resolusi: <b id="hRes">—</b></span>
       <span>Bitrate: <b id="hBitrate">—</b></span>
+      <span>Jalur: <b id="hJalur">—</b></span>
     </div>
     <div class="baris">
       <button id="btnPutus" class="bahaya">Akhiri sesi</button>
@@ -72,12 +73,12 @@
 </div>
 
 <script type="module">
-import { api, simpanToken, ambilToken, Signal, buatPeer, $, tampilkan, status, statistik }
-  from '/app.js';
+import { api, simpanToken, ambilToken, Signal, Kanal, jelaskanKegagalan,
+         $, tampilkan, status, statistik } from '/app.js';
 
 let token = ambilToken();
 let signal = null;
-let pc = null;
+let kanal = null;
 let sessionId = null;
 let timerHud = null;
 let bytesTerakhir = 0, waktuTerakhir = 0;
@@ -129,39 +130,39 @@ $('#btnHubungkan').onclick = async () => {
     bersihkan();
   });
 
-  signal.addEventListener('SDP_OFFER', async (ev) => {
-    pc = buatPeer();
-
-    pc.ontrack = (e) => {
-      $('#layar').srcObject = e.streams[0];
-      tampilkan($('#kartuConnect'), false);
-      tampilkan($('#kartuSesi'), true);
-      mulaiHud();
-    };
-    pc.onicecandidate = (e) => {
-      if (e.candidate) signal.kirim('ICE_CANDIDATE', { session_id: sessionId, candidate: e.candidate.toJSON() });
-    };
-    pc.onconnectionstatechange = () => {
-      const s = pc.connectionState;
+  // Kanal dibuat sekarang, bukan menunggu SDP_OFFER. Agent mulai mengirim
+  // kandidat ICE segera setelah setLocalDescription — jauh sebelum offer-nya
+  // sampai ke sini. Tanpa kanal yang sudah siap, kandidat-kandidat awal itu
+  // tidak punya tempat mendarat dan hilang tanpa jejak.
+  kanal = new Kanal({
+    onKandidat: (c) => signal.kirim('ICE_CANDIDATE', { session_id: sessionId, candidate: c }),
+    onStatus: (s, d) => {
       $('#hKoneksi').textContent = s;
-      status($('#statusSesi'), `sesi: ${s}`, s === 'connected' ? 'ok' : s === 'failed' ? 'bad' : 'wait');
       if (s === 'failed') {
-        status($('#statusSesi'),
-          'koneksi P2P gagal. Fase 0 belum memakai TURN, jadi jaringan di belakang Symmetric NAT belum didukung.',
-          'bad');
+        status($('#statusSesi'), jelaskanKegagalan(d), 'bad');
+        console.warn('diagnosa viewer', d);
+      } else {
+        status($('#statusSesi'), `sesi: ${s}`, s === 'connected' ? 'ok' : 'wait');
       }
-    };
+    },
+  });
 
-    await pc.setRemoteDescription({ type: 'offer', sdp: ev.detail.sdp });
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+  kanal.pc.ontrack = (e) => {
+    $('#layar').srcObject = e.streams[0];
+    tampilkan($('#kartuConnect'), false);
+    tampilkan($('#kartuSesi'), true);
+    mulaiHud();
+  };
+
+  signal.addEventListener('SDP_OFFER', async (ev) => {
+    await kanal.terapkanRemote('offer', ev.detail.sdp);
+    const answer = await kanal.pc.createAnswer();
+    await kanal.pc.setLocalDescription(answer);
     signal.kirim('SDP_ANSWER', { session_id: sessionId, sdp: answer.sdp });
   });
 
   signal.addEventListener('ICE_CANDIDATE', async (ev) => {
-    if (pc && ev.detail.candidate) {
-      try { await pc.addIceCandidate(ev.detail.candidate); } catch { /* kandidat basi */ }
-    }
+    await kanal?.tambahKandidat(ev.detail.candidate);
   });
 
   signal.addEventListener('SESSION_END', () => {
@@ -181,8 +182,10 @@ $('#btnHubungkan').onclick = async () => {
 function mulaiHud() {
   clearInterval(timerHud);
   timerHud = setInterval(async () => {
-    if (!pc) return;
-    const s = await statistik(pc);
+    if (!kanal) return;
+    const s = await statistik(kanal.pc);
+    const d = kanal.diagnosa();
+    $('#hJalur').textContent = d.punyaRelay ? 'relay' : d.punyaSrflx ? 'P2P (srflx)' : 'P2P (host)';
     $('#hRtt').textContent = s.rtt != null ? `${s.rtt} ms` : '—';
     $('#hFps').textContent = s.fps != null ? Math.round(s.fps) : '—';
     $('#hRes').textContent = s.lebar ? `${s.lebar}×${s.tinggi}` : '—';
@@ -208,7 +211,7 @@ $('#btnPutus').onclick = () => {
 
 function bersihkan() {
   clearInterval(timerHud);
-  pc?.close(); pc = null;
+  kanal?.tutup(); kanal = null;
   signal?.tutup(); signal = null;
   sessionId = null;
   $('#layar').srcObject = null;
