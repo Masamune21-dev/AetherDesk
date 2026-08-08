@@ -2,6 +2,7 @@
 
 pub mod hash;
 pub mod jwt;
+pub mod refresh;
 
 use crate::{
     error::ApiError,

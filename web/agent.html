@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk — Agent</title>
-<link rel="stylesheet" href="/style.css?v=2">
+<link rel="stylesheet" href="/style.css?v=3">
 </head>
 <body>
 <div class="wrap">
@@ -95,10 +95,10 @@
 </dialog>
 
 <script type="module">
-import { api, simpanToken, ambilToken, Signal, Kanal, jelaskanKegagalan,
-         $, tampilkan, status, kelompokkan } from '/app.js?v=2';
+import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
+         Signal, Kanal, jelaskanKegagalan, $, tampilkan, status, kelompokkan }
+  from '/app.js?v=3';
 
-let token = ambilToken();
 let device = null;      // { device_uuid, device_id, session_password }
 let signal = null;
 let stream = null;
@@ -113,8 +113,7 @@ $('#btnMasuk').onclick = async () => {
       method: 'POST',
       body: { org_slug: $('#slug').value.trim(), email: $('#email').value.trim(), password: $('#sandi').value },
     });
-    token = r.access_token;
-    simpanToken(token);
+    simpanToken(r.access_token, r.refresh_token);
     status(el, 'berhasil masuk', 'ok');
     await siapkanPerangkat();
   } catch (e) {
@@ -126,7 +125,7 @@ async function siapkanPerangkat() {
   const el = $('#statusAgent');
   try {
     device = await api('/v1/devices', {
-      method: 'POST', token,
+      method: 'POST',
       body: { os_type: 'Web', alias: 'Browser agent', hostname: location.hostname },
     });
     $('#devId').textContent = device.device_id_tampil ?? kelompokkan(device.device_id);
@@ -141,7 +140,7 @@ async function siapkanPerangkat() {
 
 $('#btnPutarSandi').onclick = async () => {
   try {
-    const r = await api(`/v1/devices/${device.device_uuid}/rotate-password`, { method: 'POST', token });
+    const r = await api(`/v1/devices/${device.device_uuid}/rotate-password`, { method: 'POST' });
     device.session_password = r.session_password;
     $('#devSandi').textContent = r.session_password;
     status($('#statusAgent'), 'kata sandi diganti', 'ok');
@@ -168,7 +167,9 @@ $('#btnBagikan').onclick = async () => {
   stream.getVideoTracks()[0].addEventListener('ended', hentikan);
 
   status(el, 'menghubungkan ke signaling…', 'wait');
-  signal = new Signal(token, device.device_uuid);
+  const akses = await aksesSegar();
+  if (!akses) return;
+  signal = new Signal(akses, device.device_uuid);
 
   signal.addEventListener('SESSION_OFFER', (ev) => tanyaPersetujuan(ev.detail));
 
@@ -284,8 +285,15 @@ function hentikan() {
 
 $('#btnStop').onclick = hentikan;
 
-// Token dari sesi sebelumnya masih berlaku selama tab belum ditutup.
-if (token) siapkanPerangkat();
+saatSesiHabis(() => {
+  hapusToken();
+  hentikan();
+  tampilkan($('#kartuDevice'), false);
+  tampilkan($('#kartuMasuk'), true);
+  status($('#statusMasuk'), 'Sesi Anda berakhir. Silakan masuk lagi.', 'wait');
+});
+
+if (adaSesi()) siapkanPerangkat();
 </script>
 </body>
 </html>

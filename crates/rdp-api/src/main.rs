@@ -76,6 +76,8 @@ async fn main() -> Result<()> {
     let v1 = Router::new()
         .route("/auth/bootstrap", post(routes::auth::bootstrap))
         .route("/auth/login", post(routes::auth::login))
+        .route("/auth/refresh", post(routes::auth::refresh_token))
+        .route("/auth/logout", post(routes::auth::logout))
         .route("/auth/me", get(routes::auth::me))
         .route(
             "/devices",

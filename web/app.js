@@ -6,23 +6,103 @@
 // diunduh dan dievaluasi sebelum layar muncul, semakin baik.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const KUNCI_TOKEN = 'aetherdesk.token';
+const KUNCI_AKSES = 'aetherdesk.access';
+const KUNCI_REFRESH = 'aetherdesk.refresh';
+
+// ── Penyimpanan token ────────────────────────────────────────────────────────
+
+export function simpanToken(akses, refresh) {
+  sessionStorage.setItem(KUNCI_AKSES, akses);
+  if (refresh) localStorage.setItem(KUNCI_REFRESH, refresh);
+}
+
+export const ambilAkses = () => sessionStorage.getItem(KUNCI_AKSES);
+export const ambilRefresh = () => localStorage.getItem(KUNCI_REFRESH);
+
+export function hapusToken() {
+  sessionStorage.removeItem(KUNCI_AKSES);
+  localStorage.removeItem(KUNCI_REFRESH);
+}
+
+/** Membaca klaim `exp` tanpa memverifikasi tanda tangan — cukup untuk
+ *  memutuskan apakah token layak dicoba. Server tetap yang menentukan. */
+function kedaluwarsa(jwt) {
+  try {
+    const p = JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    // Beri margin 30 detik supaya token tidak mati di tengah permintaan.
+    return !p.exp || p.exp * 1000 < Date.now() + 30_000;
+  } catch { return true; }
+}
+
+/**
+ * Benar bila ada sesi yang masih layak dipakai.
+ *
+ * Sebelumnya halaman hanya memeriksa "apakah ada string token", lalu
+ * menyembunyikan form masuk. Token yang sudah kedaluwarsa membuat seluruh
+ * permintaan menjawab 401 tanpa satu pun jalan kembali ke form masuk —
+ * pengguna terkunci di halaman yang tampak normal.
+ */
+export function adaSesi() {
+  const a = ambilAkses();
+  if (a && !kedaluwarsa(a)) return true;
+  return Boolean(ambilRefresh());
+}
+
+/** Dipanggil saat sesi benar-benar habis dan tidak bisa dipulihkan. */
+let onSesiHabis = () => {};
+export function saatSesiHabis(fn) { onSesiHabis = fn; }
 
 // ── Klien REST ───────────────────────────────────────────────────────────────
 
-export async function api(path, { method = 'GET', body, token } = {}) {
+async function panggil(path, { method, body, token }) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-
   const r = await fetch(`/api${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
-
   const teks = await r.text();
   let data = null;
   try { data = teks ? JSON.parse(teks) : null; } catch { /* respons bukan JSON */ }
+  return { r, data };
+}
+
+/** Menukar refresh token dengan pasangan baru. Mengembalikan access token. */
+export async function perbaruiSesi() {
+  const rt = ambilRefresh();
+  if (!rt) return null;
+
+  const { r, data } = await panggil('/v1/auth/refresh', {
+    method: 'POST',
+    body: { refresh_token: rt },
+  });
+
+  if (!r.ok) {
+    hapusToken();
+    return null;
+  }
+  const d = data.data;
+  simpanToken(d.access_token, d.refresh_token);
+  return d.access_token;
+}
+
+/**
+ * Pemanggil API dengan pemulihan sesi otomatis.
+ *
+ * Access token berumur 15 menit (ARCHITECTURE.md §6.2). Tanpa pembaruan
+ * otomatis, agent yang berbagi layar berjam-jam akan mulai gagal di tengah
+ * jalan tanpa alasan yang terlihat pengguna.
+ */
+export async function api(path, { method = 'GET', body, token, _ulang = false } = {}) {
+  const akses = token ?? ambilAkses();
+  const { r, data } = await panggil(path, { method, body, token: akses });
+
+  if (r.status === 401 && !_ulang) {
+    const baru = await perbaruiSesi();
+    if (baru) return api(path, { method, body, token: baru, _ulang: true });
+    onSesiHabis();
+  }
 
   if (!r.ok) {
     const e = new Error(data?.error?.message ?? `HTTP ${r.status}`);
@@ -33,9 +113,14 @@ export async function api(path, { method = 'GET', body, token } = {}) {
   return data?.data ?? data;
 }
 
-export const simpanToken = (t) => sessionStorage.setItem(KUNCI_TOKEN, t);
-export const ambilToken = () => sessionStorage.getItem(KUNCI_TOKEN);
-export const hapusToken = () => sessionStorage.removeItem(KUNCI_TOKEN);
+/** Access token yang dijamin masih segar, untuk dipakai WebSocket. */
+export async function aksesSegar() {
+  const a = ambilAkses();
+  if (a && !kedaluwarsa(a)) return a;
+  const baru = await perbaruiSesi();
+  if (!baru) onSesiHabis();
+  return baru;
+}
 
 // ── Klien signaling ──────────────────────────────────────────────────────────
 

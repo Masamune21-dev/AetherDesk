@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk — Viewer</title>
-<link rel="stylesheet" href="/style.css?v=2">
+<link rel="stylesheet" href="/style.css?v=3">
 </head>
 <body>
 <div class="wrap lebar">
@@ -73,10 +73,10 @@
 </div>
 
 <script type="module">
-import { api, simpanToken, ambilToken, Signal, Kanal, jelaskanKegagalan,
-         $, tampilkan, status, statistik } from '/app.js?v=2';
+import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
+         Signal, Kanal, jelaskanKegagalan, $, tampilkan, status, statistik }
+  from '/app.js?v=3';
 
-let token = ambilToken();
 let signal = null;
 let kanal = null;
 let sessionId = null;
@@ -92,8 +92,7 @@ $('#btnMasuk').onclick = async () => {
       method: 'POST',
       body: { org_slug: $('#slug').value.trim(), email: $('#email').value.trim(), password: $('#sandi').value },
     });
-    token = r.access_token;
-    simpanToken(token);
+    simpanToken(r.access_token, r.refresh_token);
     tampilkan($('#kartuMasuk'), false);
     tampilkan($('#kartuConnect'), true);
   } catch (e) { status(el, e.message, 'bad'); }
@@ -109,7 +108,7 @@ $('#btnHubungkan').onclick = async () => {
 
   let sesi;
   try {
-    sesi = await api('/v1/connect', { method: 'POST', token, body: { device_id: devId, password: sandi } });
+    sesi = await api('/v1/connect', { method: 'POST', body: { device_id: devId, password: sandi } });
   } catch (e) {
     // Server sengaja menjawab sama untuk seluruh sebab kegagalan supaya tidak
     // menjadi oracle bagi pemindai ruang ID. Pesannya diteruskan apa adanya.
@@ -120,7 +119,9 @@ $('#btnHubungkan').onclick = async () => {
   sessionId = sesi.session_id;
   status(el, 'menunggu persetujuan di perangkat tujuan…', 'wait');
 
-  signal = new Signal(token, null);
+  const akses = await aksesSegar();
+  if (!akses) return;
+  signal = new Signal(akses, null);
 
   signal.addEventListener('SESSION_ACCEPTED', () =>
     status(el, 'disetujui — menegosiasikan media…', 'wait'));
@@ -219,7 +220,17 @@ function bersihkan() {
   tampilkan($('#kartuConnect'), true);
 }
 
-if (token) { tampilkan($('#kartuMasuk'), false); tampilkan($('#kartuConnect'), true); }
+// Sesi dianggap ada hanya bila access token belum kedaluwarsa, atau masih
+// tersedia refresh token untuk memulihkannya.
+saatSesiHabis(() => {
+  hapusToken();
+  bersihkan();
+  tampilkan($('#kartuConnect'), false);
+  tampilkan($('#kartuMasuk'), true);
+  status($('#statusMasuk'), 'Sesi Anda berakhir. Silakan masuk lagi.', 'wait');
+});
+
+if (adaSesi()) { tampilkan($('#kartuMasuk'), false); tampilkan($('#kartuConnect'), true); }
 </script>
 </body>
 </html>

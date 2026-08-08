@@ -1,7 +1,12 @@
 //! Endpoint autentikasi.
 
 use crate::{
-    auth::{hash, jwt::ACCESS_TOKEN_TTL_SECONDS, Terautentikasi},
+    auth::{
+        hash,
+        jwt::ACCESS_TOKEN_TTL_SECONDS,
+        refresh::{self, SesiRefresh},
+        Terautentikasi,
+    },
     db,
     error::{ApiError, ApiResult, Sukses},
     state::AppState,
@@ -98,6 +103,10 @@ pub struct LoginReq {
 #[derive(Debug, Serialize)]
 pub struct LoginResp {
     pub access_token: String,
+    /// Ditukar lewat `/auth/refresh` saat access token kedaluwarsa.
+    /// Tanpa ini, sesi mati total setiap 15 menit — dan agent yang seharusnya
+    /// berbagi layar berjam-jam ikut terputus.
+    pub refresh_token: String,
     pub token_type: &'static str,
     pub expires_in: i64,
 }
@@ -137,13 +146,72 @@ pub async fn login(
     }
 
     let token = state.jwt.terbitkan(user_id, org_id, &req.email)?;
+
+    let refresh_token = refresh::buat();
+    let mut redis = state.redis.clone();
+    refresh::simpan(
+        &mut redis,
+        &refresh_token,
+        &SesiRefresh { user_id, org_id, email: req.email.clone() },
+    )
+    .await?;
+
     tracing::info!(%org_id, %user_id, "login berhasil");
 
     Ok(Sukses::baru(LoginResp {
         access_token: token,
+        refresh_token,
         token_type: "Bearer",
         expires_in: ACCESS_TOKEN_TTL_SECONDS,
     }))
+}
+
+// ── Refresh ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshReq {
+    pub refresh_token: String,
+}
+
+/// `POST /api/v1/auth/refresh`
+///
+/// Menukar refresh token dengan pasangan token baru. Token lama langsung
+/// dihapus — rotasi sekali pakai, sesuai praktik OAuth untuk klien publik.
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    axum::Json(req): axum::Json<RefreshReq>,
+) -> ApiResult<Sukses<LoginResp>> {
+    let mut redis = state.redis.clone();
+    let sesi = refresh::tukar(&mut redis, &req.refresh_token).await?;
+
+    let access = state.jwt.terbitkan(sesi.user_id, sesi.org_id, &sesi.email)?;
+    let baru = refresh::buat();
+    refresh::simpan(&mut redis, &baru, &sesi).await?;
+
+    tracing::debug!(user_id = %sesi.user_id, "token diperbarui");
+
+    Ok(Sukses::baru(LoginResp {
+        access_token: access,
+        refresh_token: baru,
+        token_type: "Bearer",
+        expires_in: ACCESS_TOKEN_TTL_SECONDS,
+    }))
+}
+
+// ── Logout ───────────────────────────────────────────────────────────────────
+
+/// `POST /api/v1/auth/logout`
+///
+/// Mencabut refresh token. Access token yang sudah terbit tetap berlaku sampai
+/// kedaluwarsa — itu sifat JWT tanpa daftar cabut, dan 15 menit adalah harga
+/// yang sengaja dipilih untuk itu.
+pub async fn logout(
+    State(state): State<AppState>,
+    axum::Json(req): axum::Json<RefreshReq>,
+) -> ApiResult<Sukses<serde_json::Value>> {
+    let mut redis = state.redis.clone();
+    refresh::cabut(&mut redis, &req.refresh_token).await?;
+    Ok(Sukses::baru(serde_json::json!({ "revoked": true })))
 }
 
 // ── Profil ───────────────────────────────────────────────────────────────────
