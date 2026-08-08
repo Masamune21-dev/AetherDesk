@@ -5,6 +5,27 @@ Format: tanggal, ringkasan, detail, dan keputusan yang menunggu jawaban.
 
 ---
 
+> **Alamat disamarkan.** Seluruh IP nyata pada dokumen ini diganti placeholder
+> agar tidak ikut tersimpan di repositori. Nilai sebenarnya ada di dashboard
+> Cloudflare, pada `ip addr` di server, dan di `env/aetherdesk.env`.
+>
+> | Placeholder | Artinya |
+> |---|---|
+> | `<IP-ORIGIN>` | IP publik origin yang dipakai `vid` dan `aetherdesk` |
+> | `<IP-ORIGIN-2>` | IP publik kedua pada mesin yang sama (`masamune`) |
+> | `<IP-EGRESS>` | IP keluar server |
+> | `<HOST-LAN>` | Alamat LAN server |
+> | `<HOST-LAN-LAMA>` | Alamat LAN host sebelum migrasi |
+> | `<GATEWAY-LAN>` | Gateway LAN server |
+> | `<SUBNET-LAN>` | Subnet LAN tempat server berada |
+> | `<MESIN-DEV>` / `<GATEWAY-DEV>` | Mesin pengembangan dan gateway-nya |
+>
+> Alamat `203.0.113.x`, `198.51.100.x`, dan `192.0.2.x` yang muncul di contoh
+> adalah rentang dokumentasi RFC 5737 — memang bukan alamat siapa pun.
+
+---
+
+
 ## 2026-08-08 — Sesi 1: Review dokumentasi, survei server, inisialisasi repo
 
 ### Yang dikerjakan
@@ -27,7 +48,7 @@ Delapan Blocker (harus punya jawaban tertulis sebelum kode ditulis):
 | B-07 | Jalur frame decoder → canvas Tauri tidak didefinisikan; ARCHITECTURE §4.2 vs VIEWER.md bertentangan |
 | B-08 | Reboot Safe Mode akan membuat mesin remote tidak terjangkau secara permanen |
 
-**2. Survei server deploy (`root@192.168.99.63`)**
+**2. Survei server deploy (`root@<HOST-LAN>`)**
 
 | Aspek | Kondisi |
 |---|---|
@@ -39,7 +60,7 @@ Delapan Blocker (harus punya jawaban tertulis sebelum kode ditulis):
 | **Belum** terpasang | Docker, PostgreSQL, Redis, NATS, Rust toolchain, certbot |
 | Pola SSL | Cloudflare Origin Certificate di `/etc/ssl/cloudflare/<domain>.pem` + `.key` |
 | Proteksi origin | Cloudflare Authenticated Origin Pull (`origin-pull-ca.pem` + client cert) |
-| Real IP | Snippet `/etc/nginx/snippets/cloudflare-real-ip.conf` (router SNAT dari 192.168.99.1) |
+| Real IP | Snippet `/etc/nginx/snippets/cloudflare-real-ip.conf` (router SNAT dari <GATEWAY-LAN>) |
 
 **3. Repo lokal**
 
@@ -48,19 +69,19 @@ Delapan Blocker (harus punya jawaban tertulis sebelum kode ditulis):
 
 ### Temuan yang mengubah rencana
 
-**IP origin 103.189.249.88 kemungkinan besar sudah usang.**
+**IP origin <IP-ORIGIN> kemungkinan besar sudah usang.**
 
 Komentar di `/etc/nginx/sites-enabled/vid` menyebut sendiri:
-`"Migrated from the old origin (was 192.168.99.58 / public 103.189.249.88)"` —
+`"Migrated from the old origin (was <HOST-LAN-LAMA> / public <IP-ORIGIN>)"` —
 artinya `.88` adalah IP origin **lama** sebelum `vid.masamune.my.id` dipindah ke server ini.
 
 Bukti pendukung:
 
 | Sumber | IP |
 |---|---|
-| IP egress server saat ini (`api.ipify.org`) | `103.189.249.193` |
-| `server_name` di vhost `masamune` | `103.189.249.83` |
-| `server_name` di vhost `vid` (sisa konfigurasi lama) | `103.189.249.88` |
+| IP egress server saat ini (`api.ipify.org`) | `<IP-EGRESS>` |
+| `server_name` di vhost `masamune` | `<IP-ORIGIN-2>` |
+| `server_name` di vhost `vid` (sisa konfigurasi lama) | `<IP-ORIGIN>` |
 
 Karena `vid.masamune.my.id` dan `masamune.my.id` keduanya di-proxy Cloudflare
 (resolve ke `104.21.69.142` / `172.67.209.30`), IP origin sebenarnya hanya
@@ -114,17 +135,17 @@ Deploy key ternyata sudah terdaftar di akun. Repo:
 **7. Koreksi temuan IP origin — `.88` ternyata masih benar**
 
 Setelah melihat dashboard Cloudflare: record `vid.masamune.my.id` memang masih
-memakai `103.189.249.88` dan situsnya jalan normal. Kesimpulannya router mem-forward
+memakai `<IP-ORIGIN>` dan situsnya jalan normal. Kesimpulannya router mem-forward
 beberapa IP publik ke host internal yang sama:
 
 | Domain | IP origin | Menuju |
 |---|---|---|
-| `masamune.my.id` | `103.189.249.83` | `192.168.99.63` |
-| `vid.masamune.my.id` | `103.189.249.88` | `192.168.99.63` |
-| `aetherdesk.masamune.my.id` | `103.189.249.88` | `192.168.99.63` |
+| `masamune.my.id` | `<IP-ORIGIN-2>` | `<HOST-LAN>` |
+| `vid.masamune.my.id` | `<IP-ORIGIN>` | `<HOST-LAN>` |
+| `aetherdesk.masamune.my.id` | `<IP-ORIGIN>` | `<HOST-LAN>` |
 
 Komentar "old origin" pada vhost `vid` merujuk pada perpindahan *host internal*
-(`192.168.99.58` → `.63`), bukan perubahan IP publik. Record `aetherdesk` sudah benar.
+(`<HOST-LAN-LAMA>` → `.63`), bukan perubahan IP publik. Record `aetherdesk` sudah benar.
 
 **8. Sertifikat SSL diverifikasi**
 
@@ -274,11 +295,11 @@ pemilik perangkat selamanya — pembatasan laju berubah menjadi denial of servic
 
 **15. Blocker jaringan teratasi — akses lewat IP publik**
 
-Solusinya sederhana: SSH langsung ke `root@103.189.249.88`.
+Solusinya sederhana: SSH langsung ke `root@<IP-ORIGIN>`.
 
 Penemuan yang menjelaskan banyak hal sebelumnya: `hostname -I` menunjukkan box
-ini punya **tiga alamat sekaligus** — `192.168.99.63`, `103.189.249.83`, dan
-`103.189.249.88`. Bukan NAT, melainkan IP publik yang terikat langsung ke host.
+ini punya **tiga alamat sekaligus** — `<HOST-LAN>`, `<IP-ORIGIN-2>`, dan
+`<IP-ORIGIN>`. Bukan NAT, melainkan IP publik yang terikat langsung ke host.
 Itulah sebabnya `.83` dan `.88` sama-sama bekerja, dan kenapa kekhawatiran awal
 tentang `.88` yang "usang" memang tidak berdasar.
 
@@ -494,19 +515,19 @@ Symmetric NAT baru disebut bila `srflx` ada tetapi `relay` tidak.
 
 **27. TURN terpasang — coturn di server sendiri**
 
-Temuan yang menyederhanakan rencana: `ip addr` menunjukkan `103.189.249.83/32`
-dan `103.189.249.88/32` **terikat langsung ke `eth0`**, bukan hasil NAT.
+Temuan yang menyederhanakan rencana: `ip addr` menunjukkan `<IP-ORIGIN-2>/32`
+dan `<IP-ORIGIN>/32` **terikat langsung ke `eth0`**, bukan hasil NAT.
 DEPLOYMENT_PLAN.md §7 sebelumnya menyatakan perlu port forwarding di router —
 itu keliru dan sudah dikoreksi. Cukup membuka ufw.
 
 | Aspek | Nilai |
 |---|---|
-| Alamat | `103.189.249.88:3478` UDP dan TCP |
+| Alamat | `<IP-ORIGIN>:3478` UDP dan TCP |
 | Rentang relay | `49160-49260` UDP |
 | Autentikasi | HMAC berumur pendek, TTL 6 jam |
 | Endpoint | `GET /api/v1/turn-credentials`, wajib terautentikasi |
 
-**Pengerasan adalah bagian terpentingnya.** Server berada di `192.168.99.0/24`
+**Pengerasan adalah bagian terpentingnya.** Server berada di `<SUBNET-LAN>`
 bersama host Proxmox dan mesin lain. TURN tanpa pembatasan dapat dipakai siapa
 pun yang memperoleh kredensial untuk meneruskan paket ke seluruh LAN itu —
 berubah menjadi pintu masuk jaringan. Konfigurasi memuat **13 aturan
@@ -553,16 +574,16 @@ semuanya masih hidup. Tidak ada yang rusak, dan tidak ada data yang hilang.
 
 ### Yang terpengaruh
 
-Hanya jalur SSH dari mesin pengembangan ke `192.168.99.63`.
+Hanya jalur SSH dari mesin pengembangan ke `<HOST-LAN>`.
 
 ### Diagnosis
 
 | Uji | Hasil |
 |---|---|
 | SSH `:22` | timeout (3 percobaan) |
-| ICMP ke `192.168.99.63` | 100% packet loss |
+| ICMP ke `<HOST-LAN>` | 100% packet loss |
 | TCP `:80` dan `:443` dari LAN | tidak merespons |
-| Gateway lokal `192.168.0.1` | **hidup**, 2/2 ping |
+| Gateway lokal `<GATEWAY-DEV>` | **hidup**, 2/2 ping |
 | `netstat -rn \| grep 192.168.99` | **kosong — tidak ada rute** |
 | Interface `utun0`–`utun3` | up, tetapi tidak membawa rute tersebut |
 
@@ -570,13 +591,13 @@ Hanya jalur SSH dari mesin pengembangan ke `192.168.99.63`.
 ICMP dan port 80/443 juga mati. **Bukan** server bermasalah: ketiga situs tetap
 melayani trafik lewat internet.
 
-Kesimpulan: rute `192.168.99.0/24` hilang dari tabel routing mesin pengembangan.
-Mesin ini berada di `192.168.0.118` — subnet berbeda — sehingga aksesnya selalu
+Kesimpulan: rute `<SUBNET-LAN>` hilang dari tabel routing mesin pengembangan.
+Mesin ini berada di `<MESIN-DEV>` — subnet berbeda — sehingga aksesnya selalu
 bergantung pada rute yang kini tidak ada.
 
 ### Yang perlu Anda lakukan
 
-Aktifkan kembali tunnel atau rute yang menyediakan akses ke `192.168.99.0/24`.
+Aktifkan kembali tunnel atau rute yang menyediakan akses ke `<SUBNET-LAN>`.
 Setelah itu cukup bilang "sudah", dan saya lanjutkan.
 
 ### Status yang belum diketahui

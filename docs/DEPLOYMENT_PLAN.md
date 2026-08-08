@@ -13,11 +13,32 @@
 
 ---
 
+> **Alamat disamarkan.** Seluruh IP nyata pada dokumen ini diganti placeholder
+> agar tidak ikut tersimpan di repositori. Nilai sebenarnya ada di dashboard
+> Cloudflare, pada `ip addr` di server, dan di `env/aetherdesk.env`.
+>
+> | Placeholder | Artinya |
+> |---|---|
+> | `<IP-ORIGIN>` | IP publik origin yang dipakai `vid` dan `aetherdesk` |
+> | `<IP-ORIGIN-2>` | IP publik kedua pada mesin yang sama (`masamune`) |
+> | `<IP-EGRESS>` | IP keluar server |
+> | `<HOST-LAN>` | Alamat LAN server |
+> | `<HOST-LAN-LAMA>` | Alamat LAN host sebelum migrasi |
+> | `<GATEWAY-LAN>` | Gateway LAN server |
+> | `<SUBNET-LAN>` | Subnet LAN tempat server berada |
+> | `<MESIN-DEV>` / `<GATEWAY-DEV>` | Mesin pengembangan dan gateway-nya |
+>
+> Alamat `203.0.113.x`, `198.51.100.x`, dan `192.0.2.x` yang muncul di contoh
+> adalah rentang dokumentasi RFC 5737 — memang bukan alamat siapa pun.
+
+---
+
+
 ## 1. Server Target
 
 | Aspek | Nilai |
 |---|---|
-| Host | `root@192.168.99.63` (LAN) |
+| Host | `root@<HOST-LAN>` (LAN) |
 | Hostname | `masamune` |
 | OS | Ubuntu 22.04.5 LTS (container Proxmox, kernel PVE 6.14.8) |
 | Resource | 4 vCPU · 8 GB RAM · 98 GB disk (81 GB kosong) |
@@ -44,20 +65,20 @@ Konsekuensi yang mengikat:
 
 ## 2. DNS dan IP Origin
 
-### 2.1 Peringatan: `103.189.249.88` kemungkinan besar sudah usang
+### 2.1 Peringatan: `<IP-ORIGIN>` kemungkinan besar sudah usang
 
 Komentar pada `/etc/nginx/sites-enabled/vid` menyatakan sendiri:
 
-> `Migrated from the old origin (was 192.168.99.58 / public 103.189.249.88).`
+> `Migrated from the old origin (was <HOST-LAN-LAMA> / public <IP-ORIGIN>).`
 
 Artinya `.88` adalah IP origin **sebelum** `vid.masamune.my.id` dipindahkan ke server ini.
 Tiga nilai berbeda ditemukan di sistem:
 
 | Sumber | IP |
 |---|---|
-| IP egress server saat ini | `103.189.249.193` |
-| `server_name` di vhost `masamune` | `103.189.249.83` |
-| `server_name` di vhost `vid` (sisa konfigurasi lama) | `103.189.249.88` |
+| IP egress server saat ini | `<IP-EGRESS>` |
+| `server_name` di vhost `masamune` | `<IP-ORIGIN-2>` |
+| `server_name` di vhost `vid` (sisa konfigurasi lama) | `<IP-ORIGIN>` |
 
 Kedua domain di-proxy Cloudflare — keduanya resolve ke `104.21.69.142` dan
 `172.67.209.30` — sehingga IP origin sesungguhnya hanya terlihat di dashboard Cloudflare.
@@ -70,7 +91,7 @@ Buat A record berikut di Cloudflare:
 |---|---|---|---|
 | A | `aetherdesk` | **salin persis dari record `vid`** | Proxied (awan oranye) |
 
-Jangan mengetik `103.189.249.88` dari ingatan. Buka record `vid.masamune.my.id`
+Jangan mengetik `<IP-ORIGIN>` dari ingatan. Buka record `vid.masamune.my.id`
 yang sudah terbukti jalan, salin nilai `Content`-nya, pakai nilai itu.
 
 ### 2.3 Mode SSL Cloudflare
@@ -174,14 +195,14 @@ Urutannya: isi sertifikat → `nginx -t` → baru symlink → `reload`.
 ## 7. TURN / Relay — terpasang
 
 > **Koreksi.** Versi awal dokumen ini menyatakan TURN memerlukan port forwarding
-> di router. Itu keliru: `ip addr` menunjukkan `103.189.249.83/32` dan
-> `103.189.249.88/32` **terikat langsung ke `eth0`**, bukan hasil NAT. Yang
+> di router. Itu keliru: `ip addr` menunjukkan `<IP-ORIGIN-2>/32` dan
+> `<IP-ORIGIN>/32` **terikat langsung ke `eth0`**, bukan hasil NAT. Yang
 > dibutuhkan hanya membuka ufw.
 
 | Aspek | Nilai |
 |---|---|
 | Perangkat lunak | coturn (paket Ubuntu) |
-| Alamat | `103.189.249.88` |
+| Alamat | `<IP-ORIGIN>` |
 | Port kontrol | `3478` UDP dan TCP |
 | Rentang relay | `49160-49260` UDP |
 | Autentikasi | HMAC berumur pendek, TTL 6 jam |
@@ -207,7 +228,7 @@ SHA-1 tidak berlaku pada penggunaan ini.
 
 ### 7.2 Pengerasan — bagian yang paling mudah terlewat
 
-Server ini berada di `192.168.99.0/24` bersama host Proxmox dan mesin lain.
+Server ini berada di `<SUBNET-LAN>` bersama host Proxmox dan mesin lain.
 **TURN yang tidak dibatasi dapat dipakai siapa pun yang memperoleh kredensial
 untuk meneruskan paket ke alamat mana pun yang dapat dijangkau server** —
 termasuk seluruh LAN itu. TURN terbuka berubah menjadi pintu masuk jaringan.
@@ -221,7 +242,7 @@ disamarkan).
 
 ### 7.3 Konsekuensi yang diterima
 
-IP origin `103.189.249.88` kini diketahui publik, dan itu berlaku untuk seluruh
+IP origin `<IP-ORIGIN>` kini diketahui publik, dan itu berlaku untuk seluruh
 situs di mesin ini. Yang tersisa sebagai perlindungan:
 
 - ufw menolak `80/443` dari alamat mana pun di luar rentang Cloudflare,
