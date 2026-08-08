@@ -426,6 +426,56 @@ Probe `rdp-signal` sebelumnya memakai `fetch` ke `/ws`, yang selalu menghasilkan
 Sekarang memakai WebSocket sungguhan, plus menampilkan latensi PostgreSQL dan
 Redis dari `/api/health/ready`.
 
+**24. Agent dan viewer berbasis browser**
+
+Empat halaman di `web/`, tanpa framework dan tanpa langkah build. Ini cikal
+bakal "Zero-Install Viewer" di PRD §17.2 — semakin sedikit yang harus diunduh
+sebelum layar muncul, semakin baik.
+
+| Halaman | Isi |
+|---|---|
+| `/` | Status layanan + navigasi |
+| `/setup` | Membuat organisasi pertama |
+| `/agent` | Berbagi layar via `getDisplayMedia`, prompt persetujuan |
+| `/viewer` | Quick Connect, video, HUD statistik |
+
+**Prompt persetujuan diwujudkan persis seperti QUICK_CONNECT.md §4.1:**
+
+- Tombol **Tolak** diletakkan lebih dulu dan menerima `autofocus` — menekan
+  Enter tanpa membaca berarti menolak, bukan mengizinkan
+- Tombol **Izinkan** terkunci tiga detik dengan hitung mundur terlihat,
+  mencegah klik refleks dan clickjacking
+- Nama dan email diambil dari klaim token yang sudah terverifikasi server,
+  bukan dari input yang dikirim viewer
+
+**T-10 diselesaikan di kode.** Dokumen menjawab dua kali secara berlawanan soal
+siapa pengirim SDP offer: ARCHITECTURE.md §7.1 dan API.md §9 menempatkan agent,
+sementara §8.1 menempatkan viewer. Implementasi memakai **agent sebagai offerer**
+— agent yang memiliki media, jadi ia yang menawarkan.
+
+HUD viewer menampilkan latensi, FPS, resolusi, dan bitrate dari `getStats()`,
+sesuai VIEWER.md §2.
+
+**25. Verifikasi**
+
+| Uji | Hasil |
+|---|---|
+| Seluruh halaman lewat Cloudflare | **200** (`/`, `/setup`, `/agent`, `/viewer`, `/app.js`, `/style.css`) |
+| Sintaks `app.js` dan skrip inline ketiga halaman | bersih |
+| Regresi dua situs produksi | **200** |
+
+URL bersih tanpa `.html` lewat `try_files $uri $uri.html $uri/ /index.html`.
+
+**Yang belum bisa saya verifikasi sendiri:** jalur media WebRTC dari ujung ke
+ujung. Signaling sudah terbukti 16/16 termasuk lewat `wss://`, tetapi negosiasi
+media memerlukan dua browser sungguhan. Itu perlu diuji manusia — buka `/agent`
+di satu tab dan `/viewer` di tab lain.
+
+Batasan yang sudah diketahui: Fase 0 hanya memakai STUN publik, jadi koneksi
+akan gagal bagi jaringan di belakang Symmetric NAT (secara industri 10-20%
+kasus). Viewer menampilkan pesan yang menjelaskan hal ini alih-alih sekadar
+"gagal". Lihat DEPLOYMENT_PLAN.md §7 untuk keputusan TURN yang tertunda.
+
 ---
 
 ## ~~Blocker~~ — rute jaringan ke server putus (SELESAI)

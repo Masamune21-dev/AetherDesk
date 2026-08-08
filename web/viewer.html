@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>AetherDesk — Viewer</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap lebar">
+  <header>
+    <div class="eyebrow">Viewer · Quick Connect</div>
+    <h1>Hubungkan ke perangkat</h1>
+  </header>
+
+  <!-- ── Masuk ────────────────────────────────────────────────────────────── -->
+  <section class="card" id="kartuMasuk">
+    <h2>Masuk</h2>
+    <div>
+      <label for="slug">Organisasi</label>
+      <input id="slug" class="mono" placeholder="nama-organisasi" autocomplete="organization">
+    </div>
+    <div>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username">
+    </div>
+    <div>
+      <label for="sandi">Kata sandi</label>
+      <input id="sandi" type="password" autocomplete="current-password">
+    </div>
+    <div class="baris"><button id="btnMasuk">Masuk</button></div>
+    <p class="status" id="statusMasuk"></p>
+  </section>
+
+  <!-- ── Quick Connect ────────────────────────────────────────────────────── -->
+  <section class="card" id="kartuConnect" style="display:none">
+    <h2>Quick Connect</h2>
+    <div>
+      <label for="devId">Device ID</label>
+      <input id="devId" class="mono" inputmode="numeric" placeholder="942 716 382" maxlength="11">
+    </div>
+    <div>
+      <label for="devSandi">Kata sandi sesi</label>
+      <input id="devSandi" class="mono" placeholder="8 karakter" maxlength="8" autocapitalize="characters">
+    </div>
+    <div class="baris"><button id="btnHubungkan">Hubungkan</button></div>
+    <p class="status" id="statusConnect"></p>
+  </section>
+
+  <!-- ── Sesi ─────────────────────────────────────────────────────────────── -->
+  <section class="card" id="kartuSesi" style="display:none">
+    <h2>Sesi aktif</h2>
+    <video id="layar" autoplay playsinline></video>
+    <div class="hud" id="hud">
+      <span>Koneksi: <b id="hKoneksi">—</b></span>
+      <span>Latensi: <b id="hRtt">—</b></span>
+      <span>FPS: <b id="hFps">—</b></span>
+      <span>Resolusi: <b id="hRes">—</b></span>
+      <span>Bitrate: <b id="hBitrate">—</b></span>
+    </div>
+    <div class="baris">
+      <button id="btnPutus" class="bahaya">Akhiri sesi</button>
+      <button id="btnLayarPenuh" class="sekunder">Layar penuh</button>
+    </div>
+    <p class="status" id="statusSesi"></p>
+  </section>
+
+  <footer>
+    aetherdesk.masamune.my.id · <a href="/agent" style="color:var(--accent)">buka agent</a>
+  </footer>
+</div>
+
+<script type="module">
+import { api, simpanToken, ambilToken, Signal, buatPeer, $, tampilkan, status, statistik }
+  from '/app.js';
+
+let token = ambilToken();
+let signal = null;
+let pc = null;
+let sessionId = null;
+let timerHud = null;
+let bytesTerakhir = 0, waktuTerakhir = 0;
+
+// ── Masuk ────────────────────────────────────────────────────────────────────
+$('#btnMasuk').onclick = async () => {
+  const el = $('#statusMasuk');
+  status(el, 'menghubungi server…', 'wait');
+  try {
+    const r = await api('/v1/auth/login', {
+      method: 'POST',
+      body: { org_slug: $('#slug').value.trim(), email: $('#email').value.trim(), password: $('#sandi').value },
+    });
+    token = r.access_token;
+    simpanToken(token);
+    tampilkan($('#kartuMasuk'), false);
+    tampilkan($('#kartuConnect'), true);
+  } catch (e) { status(el, e.message, 'bad'); }
+};
+
+// ── Quick Connect ────────────────────────────────────────────────────────────
+$('#btnHubungkan').onclick = async () => {
+  const el = $('#statusConnect');
+  const devId = $('#devId').value.replace(/\D/g, '');
+  const sandi = $('#devSandi').value;
+
+  status(el, 'memeriksa kredensial…', 'wait');
+
+  let sesi;
+  try {
+    sesi = await api('/v1/connect', { method: 'POST', token, body: { device_id: devId, password: sandi } });
+  } catch (e) {
+    // Server sengaja menjawab sama untuk seluruh sebab kegagalan supaya tidak
+    // menjadi oracle bagi pemindai ruang ID. Pesannya diteruskan apa adanya.
+    status(el, e.code === 'CONFLICT' ? 'perangkat sedang offline' : e.message, 'bad');
+    return;
+  }
+
+  sessionId = sesi.session_id;
+  status(el, 'menunggu persetujuan di perangkat tujuan…', 'wait');
+
+  signal = new Signal(token, null);
+
+  signal.addEventListener('SESSION_ACCEPTED', () =>
+    status(el, 'disetujui — menegosiasikan media…', 'wait'));
+
+  signal.addEventListener('SESSION_REJECTED', (ev) => {
+    status(el, `permintaan ditolak${ev.detail.reason ? ': ' + ev.detail.reason : ''}`, 'bad');
+    bersihkan();
+  });
+
+  signal.addEventListener('SDP_OFFER', async (ev) => {
+    pc = buatPeer();
+
+    pc.ontrack = (e) => {
+      $('#layar').srcObject = e.streams[0];
+      tampilkan($('#kartuConnect'), false);
+      tampilkan($('#kartuSesi'), true);
+      mulaiHud();
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate) signal.kirim('ICE_CANDIDATE', { session_id: sessionId, candidate: e.candidate.toJSON() });
+    };
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState;
+      $('#hKoneksi').textContent = s;
+      status($('#statusSesi'), `sesi: ${s}`, s === 'connected' ? 'ok' : s === 'failed' ? 'bad' : 'wait');
+      if (s === 'failed') {
+        status($('#statusSesi'),
+          'koneksi P2P gagal. Fase 0 belum memakai TURN, jadi jaringan di belakang Symmetric NAT belum didukung.',
+          'bad');
+      }
+    };
+
+    await pc.setRemoteDescription({ type: 'offer', sdp: ev.detail.sdp });
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    signal.kirim('SDP_ANSWER', { session_id: sessionId, sdp: answer.sdp });
+  });
+
+  signal.addEventListener('ICE_CANDIDATE', async (ev) => {
+    if (pc && ev.detail.candidate) {
+      try { await pc.addIceCandidate(ev.detail.candidate); } catch { /* kandidat basi */ }
+    }
+  });
+
+  signal.addEventListener('SESSION_END', () => {
+    status($('#statusSesi'), 'sesi diakhiri dari sisi perangkat', 'wait');
+    bersihkan();
+  });
+
+  signal.addEventListener('TERPUTUS', () => status(el, 'signaling terputus', 'bad'));
+
+  try {
+    await signal.hubungkan();
+    signal.kirim('SESSION_REQUEST', { session_id: sessionId, device_uuid: sesi.device_uuid });
+  } catch (e) { status(el, e.message, 'bad'); }
+};
+
+// ── HUD statistik (VIEWER.md §2) ─────────────────────────────────────────────
+function mulaiHud() {
+  clearInterval(timerHud);
+  timerHud = setInterval(async () => {
+    if (!pc) return;
+    const s = await statistik(pc);
+    $('#hRtt').textContent = s.rtt != null ? `${s.rtt} ms` : '—';
+    $('#hFps').textContent = s.fps != null ? Math.round(s.fps) : '—';
+    $('#hRes').textContent = s.lebar ? `${s.lebar}×${s.tinggi}` : '—';
+
+    if (s._bytes != null && waktuTerakhir) {
+      const dt = (s._ts - waktuTerakhir) / 1000;
+      const kbps = dt > 0 ? ((s._bytes - bytesTerakhir) * 8) / dt / 1000 : 0;
+      $('#hBitrate').textContent = kbps > 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${Math.round(kbps)} kbps`;
+    }
+    bytesTerakhir = s._bytes ?? 0;
+    waktuTerakhir = s._ts ?? 0;
+  }, 1000);
+}
+
+// ── Kontrol ──────────────────────────────────────────────────────────────────
+$('#btnLayarPenuh').onclick = () => $('#layar').requestFullscreen?.();
+
+$('#btnPutus').onclick = () => {
+  if (signal && sessionId) signal.kirim('SESSION_END', { session_id: sessionId });
+  bersihkan();
+  status($('#statusConnect'), 'sesi diakhiri', 'wait');
+};
+
+function bersihkan() {
+  clearInterval(timerHud);
+  pc?.close(); pc = null;
+  signal?.tutup(); signal = null;
+  sessionId = null;
+  $('#layar').srcObject = null;
+  tampilkan($('#kartuSesi'), false);
+  tampilkan($('#kartuConnect'), true);
+}
+
+if (token) { tampilkan($('#kartuMasuk'), false); tampilkan($('#kartuConnect'), true); }
+</script>
+</body>
+</html>

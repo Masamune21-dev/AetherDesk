@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>AetherDesk — Agent</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Agent · berbagi layar</div>
+    <h1>Bagikan layar ini</h1>
+  </header>
+
+  <!-- ── Masuk ────────────────────────────────────────────────────────────── -->
+  <section class="card" id="kartuMasuk">
+    <h2>Masuk</h2>
+    <div>
+      <label for="slug">Organisasi</label>
+      <input id="slug" class="mono" placeholder="nama-organisasi" autocomplete="organization">
+    </div>
+    <div>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username">
+    </div>
+    <div>
+      <label for="sandi">Kata sandi</label>
+      <input id="sandi" type="password" autocomplete="current-password">
+    </div>
+    <div class="baris">
+      <button id="btnMasuk">Masuk</button>
+    </div>
+    <p class="status" id="statusMasuk"></p>
+    <p class="tautan">Belum ada organisasi? <a href="/setup">Buat yang pertama</a></p>
+  </section>
+
+  <!-- ── Kredensial ───────────────────────────────────────────────────────── -->
+  <section class="card" id="kartuDevice" style="display:none">
+    <h2>Perangkat ini</h2>
+    <div class="kredensial">
+      <div class="kotak">
+        <div class="label">Device ID</div>
+        <div class="nilai" id="devId">—</div>
+      </div>
+      <div class="kotak">
+        <div class="label">Kata sandi sesi</div>
+        <div class="nilai" id="devSandi">—</div>
+      </div>
+    </div>
+    <p>Bacakan keduanya kepada orang yang akan menghubungkan. Kata sandi berganti
+       setiap kali sesi berakhir, jadi yang bocor tidak lagi berlaku.</p>
+    <div class="baris">
+      <button id="btnBagikan">Mulai berbagi layar</button>
+      <button id="btnPutarSandi" class="sekunder">Ganti kata sandi</button>
+    </div>
+    <p class="status" id="statusAgent"></p>
+  </section>
+
+  <!-- ── Pratinjau ────────────────────────────────────────────────────────── -->
+  <section class="card" id="kartuPratinjau" style="display:none">
+    <h2>Yang sedang dibagikan</h2>
+    <video id="pratinjau" autoplay muted playsinline></video>
+    <div class="baris">
+      <button id="btnStop" class="bahaya">Hentikan berbagi</button>
+    </div>
+  </section>
+
+  <footer>
+    aetherdesk.masamune.my.id · <a href="/viewer" style="color:var(--accent)">buka viewer</a>
+  </footer>
+</div>
+
+<!-- ── Dialog persetujuan (QUICK_CONNECT.md §4.1) ──────────────────────────── -->
+<dialog id="dlgSetuju">
+  <div class="isi">
+    <h2>Permintaan akses jarak jauh</h2>
+    <dl class="rincian">
+      <dt>Nama</dt><dd id="pNama">—</dd>
+      <dt>Email</dt><dd id="pEmail">—</dd>
+      <dt>Waktu</dt><dd id="pWaktu">—</dd>
+    </dl>
+    <div class="peringatan">
+      Bila diizinkan, orang ini dapat <b>melihat layar Anda</b>.
+      Anda dapat mengakhiri sesi kapan saja.
+    </div>
+    <div class="baris">
+      <!-- Tolak lebih dulu dan menerima fokus awal: menekan Enter tanpa
+           membaca berarti menolak, bukan mengizinkan. -->
+      <button id="btnTolak" class="sekunder" autofocus>Tolak</button>
+      <button id="btnIzinkan" disabled>Izinkan (3)</button>
+    </div>
+  </div>
+</dialog>
+
+<script type="module">
+import { api, simpanToken, ambilToken, Signal, buatPeer, $, tampilkan, status, kelompokkan }
+  from '/app.js';
+
+let token = ambilToken();
+let device = null;      // { device_uuid, device_id, session_password }
+let signal = null;
+let stream = null;
+const peer = new Map();  // session_id -> RTCPeerConnection
+
+// ── Masuk ────────────────────────────────────────────────────────────────────
+$('#btnMasuk').onclick = async () => {
+  const el = $('#statusMasuk');
+  status(el, 'menghubungi server…', 'wait');
+  try {
+    const r = await api('/v1/auth/login', {
+      method: 'POST',
+      body: { org_slug: $('#slug').value.trim(), email: $('#email').value.trim(), password: $('#sandi').value },
+    });
+    token = r.access_token;
+    simpanToken(token);
+    status(el, 'berhasil masuk', 'ok');
+    await siapkanPerangkat();
+  } catch (e) {
+    status(el, e.message, 'bad');
+  }
+};
+
+async function siapkanPerangkat() {
+  const el = $('#statusAgent');
+  try {
+    device = await api('/v1/devices', {
+      method: 'POST', token,
+      body: { os_type: 'Web', alias: 'Browser agent', hostname: location.hostname },
+    });
+    $('#devId').textContent = device.device_id_tampil ?? kelompokkan(device.device_id);
+    $('#devSandi').textContent = device.session_password;
+    tampilkan($('#kartuMasuk'), false);
+    tampilkan($('#kartuDevice'), true);
+    status(el, 'perangkat terdaftar — belum berbagi layar', 'wait');
+  } catch (e) {
+    status($('#statusMasuk'), e.message, 'bad');
+  }
+}
+
+$('#btnPutarSandi').onclick = async () => {
+  try {
+    const r = await api(`/v1/devices/${device.device_uuid}/rotate-password`, { method: 'POST', token });
+    device.session_password = r.session_password;
+    $('#devSandi').textContent = r.session_password;
+    status($('#statusAgent'), 'kata sandi diganti', 'ok');
+  } catch (e) { status($('#statusAgent'), e.message, 'bad'); }
+};
+
+// ── Berbagi layar ────────────────────────────────────────────────────────────
+$('#btnBagikan').onclick = async () => {
+  const el = $('#statusAgent');
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 30, max: 60 } },
+      audio: false,
+    });
+  } catch {
+    status(el, 'izin berbagi layar ditolak', 'bad');
+    return;
+  }
+
+  $('#pratinjau').srcObject = stream;
+  tampilkan($('#kartuPratinjau'), true);
+
+  // Menghentikan lewat kontrol bawaan browser harus ikut memutus sesi.
+  stream.getVideoTracks()[0].addEventListener('ended', hentikan);
+
+  status(el, 'menghubungkan ke signaling…', 'wait');
+  signal = new Signal(token, device.device_uuid);
+
+  signal.addEventListener('SESSION_OFFER', (ev) => tanyaPersetujuan(ev.detail));
+  signal.addEventListener('SDP_ANSWER', async (ev) => {
+    const pc = peer.get(ev.detail.session_id);
+    if (pc) await pc.setRemoteDescription({ type: 'answer', sdp: ev.detail.sdp });
+  });
+  signal.addEventListener('ICE_CANDIDATE', async (ev) => {
+    const pc = peer.get(ev.detail.session_id);
+    if (pc && ev.detail.candidate) {
+      try { await pc.addIceCandidate(ev.detail.candidate); } catch { /* kandidat basi */ }
+    }
+  });
+  signal.addEventListener('SESSION_END', (ev) => tutupSesi(ev.detail.session_id));
+  signal.addEventListener('TERPUTUS', () => status(el, 'signaling terputus', 'bad'));
+
+  try {
+    await signal.hubungkan();
+    status(el, 'siap menerima koneksi', 'ok');
+    $('#btnBagikan').disabled = true;
+  } catch (e) {
+    status(el, e.message, 'bad');
+  }
+};
+
+// ── Persetujuan ──────────────────────────────────────────────────────────────
+let sesiTertunda = null;
+
+function tanyaPersetujuan(p) {
+  sesiTertunda = p;
+  $('#pNama').textContent = p.viewer_name || '—';
+  $('#pEmail').textContent = p.viewer_email || '—';
+  $('#pWaktu').textContent = new Date().toLocaleString('id-ID');
+
+  const izinkan = $('#btnIzinkan');
+  // Jeda tiga detik sebelum tombol Izinkan aktif: mencegah klik refleks dan
+  // clickjacking. QUICK_CONNECT.md §4.1.
+  let sisa = 3;
+  izinkan.disabled = true;
+  izinkan.textContent = `Izinkan (${sisa})`;
+  const t = setInterval(() => {
+    sisa -= 1;
+    if (sisa <= 0) {
+      clearInterval(t);
+      izinkan.disabled = false;
+      izinkan.textContent = 'Izinkan';
+    } else {
+      izinkan.textContent = `Izinkan (${sisa})`;
+    }
+  }, 1000);
+
+  $('#dlgSetuju').returnValue = '';
+  $('#dlgSetuju').showModal();
+}
+
+$('#btnTolak').onclick = () => {
+  $('#dlgSetuju').close();
+  if (sesiTertunda) {
+    signal.kirim('SESSION_REJECT', { session_id: sesiTertunda.session_id, reason: 'ditolak pengguna' });
+    status($('#statusAgent'), 'permintaan ditolak', 'wait');
+    sesiTertunda = null;
+  }
+};
+
+$('#btnIzinkan').onclick = async () => {
+  $('#dlgSetuju').close();
+  if (!sesiTertunda) return;
+  const sid = sesiTertunda.session_id;
+  sesiTertunda = null;
+
+  signal.kirim('SESSION_ACCEPT', { session_id: sid });
+
+  // Agent adalah pihak yang menawarkan SDP. Ini menyelesaikan kontradiksi
+  // T-10: ARCHITECTURE.md §7.1 dan API.md §9 menempatkan agent sebagai
+  // offerer, sementara §8.1 menempatkan viewer. Yang dipakai: agent.
+  const pc = buatPeer();
+  peer.set(sid, pc);
+
+  stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate) signal.kirim('ICE_CANDIDATE', { session_id: sid, candidate: e.candidate.toJSON() });
+  };
+  pc.onconnectionstatechange = () => {
+    const s = pc.connectionState;
+    status($('#statusAgent'), `sesi: ${s}`, s === 'connected' ? 'ok' : s === 'failed' ? 'bad' : 'wait');
+    if (s === 'failed' || s === 'closed') tutupSesi(sid);
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  signal.kirim('SDP_OFFER', { session_id: sid, sdp: offer.sdp });
+};
+
+function tutupSesi(sid) {
+  const pc = peer.get(sid);
+  if (pc) { pc.close(); peer.delete(sid); }
+  if (peer.size === 0) status($('#statusAgent'), 'siap menerima koneksi', 'ok');
+}
+
+function hentikan() {
+  peer.forEach((pc, sid) => { signal?.kirim('SESSION_END', { session_id: sid }); pc.close(); });
+  peer.clear();
+  stream?.getTracks().forEach((t) => t.stop());
+  signal?.tutup();
+  tampilkan($('#kartuPratinjau'), false);
+  $('#btnBagikan').disabled = false;
+  status($('#statusAgent'), 'berbagi layar dihentikan', 'wait');
+}
+
+$('#btnStop').onclick = hentikan;
+
+// Token dari sesi sebelumnya masih berlaku selama tab belum ditutup.
+if (token) siapkanPerangkat();
+</script>
+</body>
+</html>

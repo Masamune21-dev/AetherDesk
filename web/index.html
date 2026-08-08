@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>AetherDesk — Fase 0</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+       padding:.7rem 0;border-bottom:1px solid var(--line-soft)}
+  .row:last-child{border-bottom:0}
+  .name{font-family:var(--mono);font-size:.85rem}
+  .note{font-size:.78rem;color:var(--dim);margin-top:.15rem}
+  .badge{font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;
+         text-transform:uppercase;padding:.22rem .5rem;border:1px solid currentColor;
+         white-space:nowrap}
+  .badge.ok{color:var(--ok)} .badge.bad{color:var(--bad)} .badge.wait{color:var(--wait)}
+  .nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem}
+  .nav a{display:block;padding:.85rem 1rem;background:var(--bg);border:1px solid var(--line);
+         color:var(--ink);text-decoration:none;border-radius:2px}
+  .nav a:hover{border-color:var(--accent)}
+  .nav .judul{font-weight:650;font-size:.95rem}
+  .nav .ket{font-size:.78rem;color:var(--dim);margin-top:.2rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Fase 0 · Control Plane</div>
+    <h1>AetherDesk</h1>
+  </header>
+
+  <section class="card">
+    <h2>Coba sekarang</h2>
+    <div class="nav">
+      <a href="/setup">
+        <div class="judul">Penyiapan</div>
+        <div class="ket">Buat organisasi pertama</div>
+      </a>
+      <a href="/agent">
+        <div class="judul">Agent</div>
+        <div class="ket">Bagikan layar perangkat ini</div>
+      </a>
+      <a href="/viewer">
+        <div class="judul">Viewer</div>
+        <div class="ket">Hubungkan lewat Device ID</div>
+      </a>
+    </div>
+    <p>Buka <b>Agent</b> di satu tab dan <b>Viewer</b> di tab lain, lalu masukkan
+       Device ID beserta kata sandi sesi yang ditampilkan agent.</p>
+  </section>
+
+  <section class="card">
+    <h2>Status layanan</h2>
+    <div class="row" data-probe="http" data-path="/nginx-health">
+      <div><div class="name">nginx</div><div class="note">TLS, routing, aset statis</div></div>
+      <span class="badge wait">cek…</span>
+    </div>
+    <div class="row" data-probe="http" data-path="/api/health/ready">
+      <div><div class="name">rdp-api</div><div class="note">REST · auth, perangkat, Quick Connect</div></div>
+      <span class="badge wait">cek…</span>
+    </div>
+    <div class="row" data-probe="ws" data-path="/ws">
+      <div><div class="name">rdp-signal</div><div class="note">WebSocket · signaling, presence</div></div>
+      <span class="badge wait">cek…</span>
+    </div>
+    <div class="row">
+      <div><div class="name">postgres</div><div class="note">metadata persisten</div></div>
+      <span class="badge wait" id="pg">cek…</span>
+    </div>
+    <div class="row">
+      <div><div class="name">redis</div><div class="note">presence, pembatasan laju</div></div>
+      <span class="badge wait" id="rd">cek…</span>
+    </div>
+  </section>
+
+  <footer>
+    aetherdesk.masamune.my.id<br>
+    github.com/Masamune21-dev/AetherDesk
+  </footer>
+</div>
+
+<script type="module">
+const set = (el, kelas, teks) => { el.className = 'badge ' + kelas; el.textContent = teks; };
+
+async function probeHttp(row) {
+  const badge = row.querySelector('.badge');
+  try {
+    const r = await fetch(row.dataset.path, { cache: 'no-store' });
+    if (r.ok) {
+      set(badge, 'ok', 'aktif');
+      if (row.dataset.path.includes('ready')) {
+        const d = await r.json();
+        for (const c of d.checks ?? []) {
+          const el = document.getElementById(c.name === 'postgres' ? 'pg' : 'rd');
+          if (el) set(el, c.ok ? 'ok' : 'bad', c.ok ? `aktif · ${c.latency_ms} ms` : 'gagal');
+        }
+      }
+    } else if (r.status === 502 || r.status === 503) {
+      set(badge, 'wait', 'belum dipasang');
+    } else {
+      set(badge, 'bad', 'HTTP ' + r.status);
+    }
+  } catch { set(badge, 'bad', 'tak terjangkau'); }
+}
+
+// Signaling harus diuji dengan WebSocket sungguhan. `fetch` ke /ws selalu
+// menghasilkan 400 karena bukan permintaan upgrade, dan itu bukan indikasi
+// layanannya mati.
+function probeWs(row) {
+  const badge = row.querySelector('.badge');
+  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + row.dataset.path;
+  let selesai = false;
+  try {
+    const ws = new WebSocket(url);
+    const batas = setTimeout(() => {
+      if (!selesai) { selesai = true; ws.close(); set(badge, 'bad', 'timeout'); }
+    }, 4000);
+    ws.onopen = () => {
+      if (selesai) return;
+      selesai = true; clearTimeout(batas);
+      set(badge, 'ok', 'aktif');
+      ws.close();
+    };
+    ws.onerror = () => {
+      if (selesai) return;
+      selesai = true; clearTimeout(batas);
+      set(badge, 'wait', 'belum dipasang');
+    };
+  } catch { set(badge, 'bad', 'tak terjangkau'); }
+}
+
+function tick() {
+  document.querySelectorAll('[data-probe="http"]').forEach(probeHttp);
+  document.querySelectorAll('[data-probe="ws"]').forEach(probeWs);
+}
+tick(); setInterval(tick, 5000);
+</script>
+</body>
+</html>
