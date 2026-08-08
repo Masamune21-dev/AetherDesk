@@ -1,0 +1,20 @@
+[package]
+name = "rdp-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tipe inti, protokol, dan primitif kriptografi AetherDesk"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true }

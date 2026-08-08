@@ -172,15 +172,77 @@ Database `aetherdesk` dan role `aetherdesk` dibuat, Redis diberi `requirepass`.
 Kredensial acak 32 karakter ditulis ke `env/aetherdesk.env` mode `0600`,
 diblokir `.gitignore`. Keduanya diuji: `PostgreSQL 16.14` dan `PONG`.
 
+**11. Workspace Rust — `rdp-core` dan `rdp-api` berjalan di produksi**
+
+Struktur mengikuti ARCHITECTURE.md §11.1.
+
+`rdp-core` — tanpa dependensi framework, database, maupun message bus.
+Batas itu yang membuat ADR-005 dapat ditegakkan, bukan sekadar dijanjikan.
+
+| Modul | Isi |
+|---|---|
+| `damm` | Check digit device ID, dengan test yang membuktikan **seluruh** kesalahan satu digit dan **seluruh** transposisi bersebelahan tertangkap |
+| `ids` | Newtype `DeviceId`, `UserId`, `OrgId`, `SessionId`, `DeviceUuid` |
+| `password` | Password sesi 8 karakter, alfabet 32 simbol, entropi 40 bit |
+| `event` | `DomainEvent` + trait `EventBus` (ADR-013) dengan `InProcessBus` |
+| `error` | `CoreError` — sengaja **tanpa** varian infrastruktur, agar `rdp-core` tidak menarik `sqlx`/`redis` |
+
+`rdp-api` — Axum, kolam koneksi, endpoint kesehatan, shutdown rapi via SIGTERM.
+
+**Tiga bug ditemukan oleh test, bukan oleh pengguna:**
+
+| Bug | Detail |
+|---|---|
+| Fixture Damm salah | `942716385` tidak lolos Damm; check digit yang benar `2`. QUICK_CONNECT.md ikut dikoreksi. |
+| Alfabet password kontradiktif | Dokumen menyatakan membuang `0 O 1 I L`, tetapi kelimanya hanya menyisakan **31** simbol — bukan 32 seperti yang diklaim. Diputuskan `L` dipertahankan (kerancuan `l`/`1` hanya ada pada huruf kecil) sehingga entropi tepat 40 bit. Dokumen dan kode kini sepakat. |
+| Prefiks path | nginx meneruskan URI apa adanya, jadi route harus hidup di bawah `/api`. Sekaligus menuntaskan **R-05** — satu bentuk path untuk seluruh sistem. |
+
+Hasil akhir: **37 test lulus, 0 gagal.**
+
+**12. Migrasi database — `migrations/0001_initial.sql`**
+
+Perbaikan diterapkan sejak migrasi pertama, dan masing-masing **dibuktikan**, bukan
+diasumsikan:
+
+| Temuan | Perbaikan | Bukti |
+|---|---|---|
+| T-05 | `UNIQUE (organization_id, email)` | Email sama di dua org berhasil; duplikat dalam satu org ditolak |
+| T-06 | `PRIMARY KEY (id, created_at)` pada tabel terpartisi | Terverifikasi pada ketiga tabel |
+| T-06 | `ON DELETE SET NULL` + snapshot identitas pada `sessions` | Organisasi dengan sesi historis kini bisa dihapus |
+| T-07 | Tabel `groups` didefinisikan, FK `devices.group_id` ditambahkan | — |
+| T-07 | Kolom `version` + trigger OCC | Naik otomatis, tidak bergantung disiplin pemanggil |
+| T-07 | Policy RLS pada 6 tabel, `FORCE ROW LEVEL SECURITY` | Tenant Alpha hanya melihat 1 dari 2 pengguna |
+| T-08 | Trigger append-only pada `audit_logs` | `UPDATE` dan `DELETE` keduanya ditolak |
+| T-01 | Kolom `mac_address MACADDR` | Wake-on-LAN kini mungkin dibentuk |
+| R-08 | `ip_address INET` menggantikan `VARCHAR(45)` | — |
+| — | Partisi `DEFAULT` pada ketiga tabel | Audit trail tidak berhenti diam-diam bila cron partisi terlewat |
+
+**13. Layanan berjalan**
+
+`aetherdesk-api.service` — systemd dengan hardening penuh: `ProtectSystem=strict`,
+`MemoryDenyWriteExecute`, `RestrictAddressFamilies`, `NoNewPrivileges`.
+
+```
+$ curl https://aetherdesk.masamune.my.id/api/health
+{"status":"ok","service":"rdp-api","version":"0.1.0"}
+
+$ curl https://aetherdesk.masamune.my.id/api/health/ready
+{"status":"ready","checks":[{"name":"postgres","ok":true,"latency_ms":0},
+                            {"name":"redis","ok":true,"latency_ms":0}]}
+```
+
+Regresi diperiksa ulang setelah setiap perubahan nginx: `masamune.my.id` **200**,
+`vid.masamune.my.id` **200**.
+
 ### Menunggu Anda
 
-Tidak ada. Semua yang perlu Anda lakukan sudah selesai.
+Tidak ada.
 
 ### Berikutnya dari saya
 
-1. Scaffold workspace Rust: `rdp-core`, `rdp-api`, `rdp-signal`
-2. Migrasi database awal — perbaikan T-05 s/d T-08 diterapkan sejak migrasi pertama,
-   bukan ditambal belakangan
+1. `rdp-api`: modul auth (Argon2id + JWT EdDSA sesuai ADR-008), device registration,
+   dan alur Quick Connect
+2. `rdp-signal`: WebSocket signaling — presence dan relay SDP/ICE
 3. Dashboard Vue 3 + agent/viewer berbasis browser
 4. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
 

@@ -37,10 +37,14 @@ yang bisa dilakukan adalah membatasi kerusakan dan membuat jejaknya terlihat (§
 ### 2.1 Struktur
 
 ```
-   9 4 2   7 1 6   3 8 5
-   └─────┴─────┴─────┘
-   9 digit, ditampilkan dalam 3 kelompok
+   9 4 2   7 1 6   3 8   2
+   └───── payload ─────┘ └┴─ check digit Damm
+   8 digit acak            dihitung dari payload
 ```
+
+Contoh di atas adalah ID yang benar-benar valid: check digit `2` memang hasil
+perhitungan Damm atas payload `94271638`. Seluruh contoh di dokumen ini
+diverifikasi terhadap implementasi di `crates/rdp-core/src/damm.rs`.
 
 | Aspek | Nilai |
 |---|---|
@@ -90,8 +94,14 @@ password sesi.
 | Sumber | CSPRNG, tidak pernah diturunkan dari device ID atau waktu |
 | Penyimpanan | Argon2id, **tidak pernah** disimpan dalam bentuk asli |
 
-Alfabet sengaja membuang `0`, `O`, `1`, `I`, dan `L` — karakter yang paling sering
-tertukar saat dibacakan lewat telepon.
+Alfabet membuang empat karakter yang paling sering tertukar secara visual:
+`0`/`O` dan `1`/`I`.
+
+Huruf `L` sengaja **dipertahankan**. Kerancuan `l` dengan `1` hanya muncul pada
+huruf kecil, sementara password ini selalu ditampilkan dan dinormalkan ke huruf
+besar. Membuang kelimanya akan menyisakan 31 simbol dan menurunkan entropi ke
+39,6 bit — angka ganjil yang tidak sepadan dengan manfaatnya. Dengan 32 simbol,
+entropinya tepat 40 bit.
 
 ### 3.1 Siklus hidup
 
@@ -278,7 +288,7 @@ Setiap upaya, berhasil maupun gagal, menghasilkan entri audit:
 |---|---|
 | `action` | `quick_connect.attempt` |
 | `outcome` | `accepted` / `bad_password` / `unknown_id` / `throttled` / `rejected_by_user` |
-| `device_id_input` | `942716385` |
+| `device_id_input` | `942716382` |
 | `source_ip` | `203.0.113.195` |
 | `viewer_user_id` | `usr_7812` bila terautentikasi |
 | `latency_ms` | durasi penanganan |
