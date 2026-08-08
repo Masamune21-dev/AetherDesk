@@ -197,9 +197,16 @@ Memberikan solusi remote desktop yang:
 
 ### 6.1 Performance KPIs
 
+> **Definisi latency.** Angka di bawah adalah **added latency** — selisih antara
+> berinteraksi lewat AetherDesk dan berinteraksi langsung di mesin itu. Ini bukan
+> glass-to-glass. Pada capture 60fps, satu interval frame saja sudah 16,7ms sebelum
+> encode, jaringan, decode, dan render dihitung, sehingga angka glass-to-glass di
+> bawah 16ms mustahil secara fisik. Rincian anggaran per tahap ada di §11.5.
+
 | Metrik | Target LAN | Target WAN | Kompetitor Terbaik |
 |--------|-----------|-----------|-------------------|
-| Latency (input-to-display) | < 16ms | < 100ms | AnyDesk ~20ms LAN |
+| Added latency (input-to-display) | < 16ms | < 100ms | AnyDesk ~20ms LAN |
+| Glass-to-glass (60fps, LAN) | < 50ms | < 140ms | — |
 | Frame Rate | 60 fps | 30-60 fps | Parsec 60fps |
 | Connection Time | < 2 detik | < 5 detik | AnyDesk ~3s |
 | CPU Usage (idle) | < 1% | < 1% | RustDesk ~2% |

@@ -48,6 +48,38 @@ Agent dapat me-reboot OS remote ke berbagai state:
   bcdedit /deletevalue {current} safeboot
   ```
 
+#### Prasyarat wajib — tanpa ini mesin remote akan hilang permanen
+
+Safe Mode tidak menjalankan sebagian besar service. Jika `aetherdesk-service` tidak
+terdaftar di hive SafeBoot, urutan yang terjadi adalah: mesin boot ke Safe Mode →
+agent tidak berjalan → perintah `bcdedit /deletevalue` tidak akan pernah bisa
+dikirim → mesin tidak terjangkau sampai ada orang yang datang secara fisik.
+
+**1. Pendaftaran saat instalasi.** Installer wajib menulis kedua key berikut,
+dan instalasi dinyatakan gagal bila penulisan tidak berhasil:
+
+```
+HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\aetherdesk-service
+  (Default) = "Service"
+HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Network\aetherdesk-service
+  (Default) = "Service"
+```
+
+**2. Verifikasi sebelum eksekusi.** Perintah Safe Mode reboot memeriksa keberadaan
+kedua key tersebut terlebih dahulu. Bila salah satu tidak ada, perintah **ditolak**
+dengan galat `SAFEBOOT_NOT_REGISTERED` dan reboot tidak dijalankan.
+
+**3. Watchdog pemulihan otomatis.** Saat agent start dan mendeteksi sistem sedang
+berada di Safe Mode (`GetSystemMetrics(SM_CLEANBOOT) != 0`), agent menjalankan timer.
+Bila tidak ada sesi remote yang terhubung dalam **15 menit**, agent otomatis
+menjalankan `bcdedit /deletevalue {current} safeboot` lalu me-reboot ke mode normal.
+Ini menjamin mesin selalu kembali sendiri meskipun teknisi kehilangan koneksi
+atau lupa mengembalikannya.
+
+**4. Batas waktu maksimum.** Safe Mode tidak boleh bertahan lebih dari 4 jam.
+Setelah ambang itu, watchdog mengembalikan boot normal tanpa memandang ada atau
+tidaknya sesi aktif.
+
 ---
 
 ## 3. Remote Printing (Virtual Print Driver)

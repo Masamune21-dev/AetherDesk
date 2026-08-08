@@ -297,6 +297,88 @@ Dimulai sebagai modular monolith dengan clear module boundaries. Setiap modul:
 | **Rationale** | JSONB untuk semi-structured data, partitioning untuk logs, excellent full-text search, mature HA dengan Patroni, row-level security untuk multi-tenant |
 | **Alternatives** | MySQL (kurang fitur JSON/advanced queries), CockroachDB (overhead distributed SQL), ScyllaDB (no joins, lebih cocok untuk time-series only) |
 
+### ADR-007: Vue 3 SPA Menggantikan Laravel BFF
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | WEB.md menetapkan Laravel 13 + Inertia sebagai BFF di depan API Rust. Keputusan itu tidak pernah punya ADR, padahal konsekuensinya besar: runtime kedua di jalur request, autentikasi diimplementasikan dua kali, sistem WebSocket ketiga (Soketi/Reverb) di samping Signal Server dan NATS, serta cache Redis keempat yang berisiko tidak sinkron dengan sisi Rust. Server target juga menjalankan PHP 8.3 sementara dokumen mensyaratkan 8.4. |
+| **Decision** | Dashboard dibangun sebagai SPA Vue 3 + TypeScript murni, di-build oleh Vite menjadi aset statis, disajikan langsung oleh nginx, dan berbicara ke API Rust tanpa perantara. Laravel dihapus dari arsitektur. |
+| **Rationale** | |
+| | • **Satu sistem auth** — JWT dari API Rust dipakai langsung, tidak ada session cookie PHP yang perlu disinkronkan |
+| | • **Satu hop lebih sedikit** — mendukung target p50 < 50ms (NFR-PER-01) |
+| | • **Satu sumber kebenaran real-time** — Signal Server yang sudah ada, bukan Soketi/Reverb terpisah |
+| | • **Jejak server lebih kecil** — tidak ada PHP-FPM pool tambahan pada node yang dibagi dengan layanan produksi lain |
+| **Alternatives** | Laravel + Inertia sesuai dokumen asli (ditolak: duplikasi auth dan runtime). Next.js SSR (ditolak: dashboard di balik login tidak butuh SEO, SSR hanya menambah runtime Node). |
+| **Consequences** | Halaman dashboard tidak lagi server-side rendered. Ini tidak merugikan karena seluruh dashboard berada di balik autentikasi dan tidak perlu diindeks mesin pencari. WEB.md §1 dan §4 harus direvisi mengikuti keputusan ini. |
+
+### ADR-008: SDP Ditandatangani Device Key, dan JWT Asimetris
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | Dua celah terpisah yang berbagi akar yang sama. Pertama, klaim E2E encryption di seluruh dokumen tidak berlaku selama Signal Server meneruskan fingerprint DTLS tanpa verifikasi — siapa pun yang menguasai signaling dapat menukar fingerprint dan menjadi man-in-the-middle tanpa terdeteksi. Kedua, contoh token di API.md memakai `RS256` sementara konfigurasi menyediakan `jwt_secret` tunggal yang menyiratkan HMAC simetris. |
+| **Decision** | (a) Seluruh SDP beserta fingerprint DTLS ditandatangani dengan device key Ed25519 dan diverifikasi pihak lawan terhadap sertifikat device yang dipin. SDP dengan tanda tangan tidak sah ditolak sebelum negosiasi ICE dimulai. (b) Sesi attended menampilkan short authentication string enam karakter turunan dari kedua fingerprint, untuk diverifikasi lisan. (c) JWT ditandatangani Ed25519 (`EdDSA`), bukan HMAC — kunci privat hanya ada di API Server, verifier lain cukup memegang kunci publik. |
+| **Rationale** | Tanpa (a), "zero-trust E2E" adalah klaim pemasaran dan bukan properti sistem, dan seluruh pilar Security First di PRD §1 kehilangan dasar. Tanpa (c), setiap layanan yang perlu memverifikasi token juga memegang kemampuan menerbitkannya. |
+| **Consequences** | Signal Server tetap tidak dipercaya — persis yang dikehendaki Zero Trust (§2.1). Verifikasi tanda tangan menambah sekitar 50 µs per negosiasi, tidak berpengaruh pada target waktu koneksi. Rotasi device key memerlukan periode tumpang tindih agar sesi berjalan tidak putus. |
+| **Menutup temuan** | B-01, T-11 |
+
+### ADR-009: Session Recording Dienkripsi di Klien dengan Escrow Kunci Organisasi
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | UC-07 menuntut recording wajib yang tidak dapat dimatikan teknisi dan dapat diputar auditor. Jika E2E benar-benar berlaku, server tidak memiliki kunci untuk menghasilkan rekaman itu. VIEWER.md justru menampilkan recording sebagai tombol lokal di toolbar — yang berarti kendalinya di tangan teknisi, persis yang dilarang UC-07. Kedua klaim tidak dapat benar sekaligus. |
+| **Decision** | Recording dilakukan di sisi viewer, dienkripsi dengan kunci simetris acak per sesi, dan kunci itu dibungkus dengan **kunci publik escrow milik organisasi** sebelum diunggah bersama rekaman. Server menyimpan ciphertext dan tidak pernah memegang kunci privat escrow. Ketika policy organisasi mewajibkan recording, agent menolak memulai sesi bila viewer tidak mengonfirmasi recording aktif. |
+| **Rationale** | Mempertahankan E2E — server tetap buta — sekaligus memenuhi kewajiban compliance. Kewajiban ditegakkan oleh agent, bukan oleh niat baik teknisi, sehingga UC-07 terpenuhi secara teknis. |
+| **Alternatives** | Recording sisi server (ditolak: membatalkan E2E). Recording lokal tanpa escrow (ditolak: tidak memenuhi UC-07). |
+| **Consequences** | Organisasi bertanggung jawab menyimpan kunci privat escrow; kehilangan kunci berarti rekaman tidak dapat dibuka selamanya, dan ini harus dinyatakan tegas saat onboarding. Perlu prosedur rotasi kunci escrow beserta re-wrapping rekaman lama. |
+| **Menutup temuan** | B-02 |
+
+### ADR-010: Agent Windows Dipecah Menjadi Service dan Session Agent
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | DXGI Desktop Duplication yang berjalan di dalam sesi user biasa tidak dapat menangkap secure desktop: prompt UAC, layar Ctrl+Alt+Del, dan layar login. Sementara FR-INP-03 mensyaratkan Ctrl+Alt+Del, UC-02 menuntut akses server unattended, UC-06 menuntut sesi bertahan melewati reboot, dan UC-17 menuntut kiosk tanpa user login. Dokumen sebelumnya hanya menuliskan "OS Service" sebagai satu kotak diagram. |
+| **Decision** | Agent Windows terdiri dari dua proses. **`aetherdesk-service`** berjalan sebagai LocalSystem, bertanggung jawab atas identitas device, koneksi ke server, auto-update, dan watchdog. **`aetherdesk-session`** dijalankan oleh service ke dalam sesi interaktif aktif melalui `WTSQueryUserToken` + `CreateProcessAsUser`, dan melakukan capture serta injeksi input. Service memantau `WTS_SESSION_CHANGE` dan me-respawn session agent saat terjadi logon, logoff, lock, unlock, atau fast user switching, termasuk ke desktop `Winlogon` saat secure desktop aktif. |
+| **Rationale** | Ini satu-satunya cara yang didukung Windows untuk menembus session-0 isolation. Menundanya berarti seluruh alur unattended harus dirancang ulang di kemudian hari. |
+| **Consequences** | Perlu kanal IPC terautentikasi antara kedua proses (named pipe dengan DACL ketat). Injeksi input pada secure desktop memerlukan privilege LocalSystem dan menjadi permukaan serang paling sensitif — wajib masuk threat model. |
+| **Menutup temuan** | B-03 |
+
+### ADR-011: Agent macOS Memakai Hardened Runtime dengan PPPC, Bukan App Sandbox
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | SECURITY.md §3.1 menyatakan agent macOS dibatasi entitlement App Sandbox. Agent remote control memerlukan izin Screen Recording dan Accessibility melalui TCC; keduanya tidak dapat diperoleh di dalam App Sandbox, dan tidak dapat disetujui otomatis tanpa profil PPPC yang dipasang lewat MDM. Untuk unattended access, tanpa jalur MDM setiap mesin harus disentuh manusia sekali. |
+| **Decision** | Agent macOS didistribusikan sebagai daemon `launchd` dengan Hardened Runtime dan notarisasi Apple, **bukan** App Sandbox. Deployment enterprise mensyaratkan profil PPPC yang memberikan `kTCCServiceScreenCapture` dan `kTCCServiceAccessibility`, didorong melalui MDM. Deployment non-MDM tetap didukung untuk mode attended, dengan alur onboarding yang memandu pemberian izin secara manual. |
+| **Rationale** | Menyatakan prasyarat MDM secara terbuka jauh lebih baik daripada menemukannya saat pelanggan enterprise pertama gagal melakukan rollout. |
+| **Consequences** | Dokumentasi penjualan harus menyatakan MDM sebagai prasyarat unattended di macOS. Perlu menyediakan berkas `.mobileconfig` siap pakai. Sandbox tidak lagi menjadi batas keamanan, sehingga hardening beralih ke minimalisasi permukaan dan validasi ketat pada kanal IPC. |
+| **Menutup temuan** | B-04 |
+
+### ADR-012: Viewer Merender ke Native Surface, Bukan ke Canvas Webview
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | §4.2 menempatkan connection manager, decode pipeline, dan render GPU di sisi Rust, sementara VIEWER.md §2 menyatakan statistik diambil dari `getStats()` WebRTC — yang mengharuskan peer connection hidup di dalam webview. Keduanya tidak dapat benar sekaligus. Lebih penting lagi, menyalurkan frame terdekode dari Rust ke canvas webview pada 4K 60fps adalah masalah tersulit dari pilihan Tauri, dan ADR-003 tidak menyebutnya sama sekali. |
+| **Decision** | WebRTC, decode, dan render seluruhnya berada di sisi Rust. Frame digambar ke **child window native** (`wgpu`, dengan backend D3D12 di Windows dan Metal di macOS) yang diposisikan tepat di bawah webview. Webview hanya merender kromnya: toolbar, tab, dialog, panel statistik — dengan latar transparan pada area video. Statistik sesi diambil dari peer connection Rust dan dikirim ke UI melalui event Tauri, bukan dari `getStats()`. |
+| **Rationale** | Menghapus penyalinan frame antar proses sepenuhnya. Frame terdekode tetap berada di VRAM dari decoder sampai layar, sesuai janji STREAMING.md §1. |
+| **Alternatives** | WebRTC penuh di webview (ditolak: tidak dapat mengakses decoder hardware secara langsung dan kehilangan kendali atas jitter buffer). Transfer frame ke canvas via shared memory (ditolak: satu salinan penuh per frame, 4K 60fps berarti sekitar 1,5 GB/detik). |
+| **Consequences** | Penempatan child window harus mengikuti resize, perpindahan monitor, dan perubahan DPI. ADR-003 perlu diperbarui: keunggulan Tauri di sini adalah ukuran dan akses Rust, bukan rendering lewat webview. |
+| **Menutup temuan** | B-07 |
+
+### ADR-013: Fase 0 Berjalan Satu Node Tanpa NATS dan Kubernetes
+
+| | Detail |
+|---|---|
+| **Status** | Accepted (2026-08-08) |
+| **Context** | §10.1 dan DEPLOYMENT.md menggambarkan cluster Kubernetes dengan NATS JetStream, PostgreSQL HA via Patroni, dan Redis Cluster. Server yang tersedia untuk Fase 0 adalah satu node 4 vCPU / 8 GB yang juga melayani dua situs produksi. |
+| **Decision** | Fase 0 dijalankan sebagai layanan systemd native pada satu node: PostgreSQL tunggal, Redis tunggal, tanpa NATS, tanpa Kubernetes. Domain event tetap didefinisikan sebagai tipe Rust eksplisit dan dipublikasikan melalui trait `EventBus`, dengan implementasi in-process untuk Fase 0. |
+| **Rationale** | Batas modul yang dijanjikan ADR-005 tetap ditegakkan di tingkat tipe, sehingga penggantian implementasi `EventBus` menjadi NATS kelak hanya menyentuh satu adapter. Memasang NATS dan Kubernetes hari ini menambah beban operasional tanpa memberi manfaat pada satu node. |
+| **Consequences** | Tidak ada ketahanan terhadap kegagalan node selama Fase 0, dan hal itu diterima untuk tahap ini. Target uptime di PRD §10.2 belum berlaku sampai Fase 1. Trait `EventBus` wajib ada sejak commit pertama, bukan ditambahkan belakangan. |
+
 ---
 
 ## 4. Component Architecture

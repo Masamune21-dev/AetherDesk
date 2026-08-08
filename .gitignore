@@ -1,0 +1,49 @@
+# ── Rahasia — jangan pernah ter-commit ────────────────────────────────────────
+*.env
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+secrets/
+env/
+
+# ── Rust ──────────────────────────────────────────────────────────────────────
+target/
+**/*.rs.bk
+*.pdb
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.pnpm-store/
+
+# ── Log & runtime ─────────────────────────────────────────────────────────────
+log/
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ── Build artefak ─────────────────────────────────────────────────────────────
+bin/
+build/
+out/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
