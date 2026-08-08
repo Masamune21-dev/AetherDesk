@@ -156,6 +156,24 @@ Lihat `QUICK_CONNECT.md` §4.1. Aturannya mengikat:
 - Tombol **Izinkan** terkunci tiga detik dengan hitung mundur terlihat
 - Identitas peminta diambil dari klaim token, tidak pernah dari input
 
+## 5.6 Menyembunyikan elemen
+
+Pakai atribut `hidden`, dan **jangan** `style="display:none"`. Atribut itu juga
+memberi tahu teknologi bantu bahwa elemennya memang tidak ada, bukan sekadar
+tidak terlihat.
+
+Prasyaratnya satu, dan mudah terlewat: `style.css` wajib memuat
+
+```css
+[hidden] { display: none !important; }
+```
+
+Selektor `[hidden]` pada stylesheet peramban berspesifisitas sama dengan
+selektor kelas, dan stylesheet proyek datang belakangan — sehingga
+`.card { display: flex }` menimpanya tanpa suara. Gejalanya: seluruh kartu
+tampil sekaligus meskipun atribut `hidden` terpasang rapi di HTML. Pernah
+terjadi, dan tidak menghasilkan galat apa pun di konsol.
+
 ## 6. Aksesibilitas
 
 - Kontras teks utama minimal 4.5:1, teks besar minimal 3:1
