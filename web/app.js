@@ -311,6 +311,91 @@ export function jelaskanKegagalan(d) {
   return `Koneksi gagal (ICE: ${d.ice}).`;
 }
 
+// ── Medan aether ─────────────────────────────────────────────────────────────
+
+/**
+ * Muka gelombang sepusat yang merambat pelan dari satu titik asal.
+ *
+ * Ini satu-satunya gerakan di seluruh antarmuka, dan sengaja begitu. Alih-alih
+ * hujan partikel yang dipakai hampir semua halaman teknologi, yang digambar di
+ * sini adalah hal yang benar-benar dilakukan produk ini: sinyal yang merambat
+ * melintasi jarak sampai akhirnya meredup.
+ *
+ * Dijaga agar murah — 24 fps, sepuluh muka gelombang, garis setipis rambut.
+ * Saat pengguna meminta gerakan dikurangi, satu bingkai statis digambar lalu
+ * animasinya tidak pernah dimulai.
+ */
+export function pasangMedan() {
+  const kanvas = document.createElement('canvas');
+  kanvas.id = 'medan';
+  kanvas.setAttribute('aria-hidden', 'true');
+  document.body.prepend(kanvas);
+
+  const ctx = kanvas.getContext('2d', { alpha: true });
+  const kurangiGerak = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let w = 0, h = 0, asalX = 0, asalY = 0;
+  const JUMLAH = 10;
+  const JARAK = 190;      // jarak antar muka gelombang, piksel
+  const KECEPATAN = 0.16; // piksel per milidetik — lambat dan tenang
+
+  function ukur() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    w = innerWidth; h = innerHeight;
+    kanvas.width = w * dpr;
+    kanvas.height = h * dpr;
+    kanvas.style.width = `${w}px`;
+    kanvas.style.height = `${h}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Titik asal di luar tepi kiri-atas: gelombang menyeberangi layar,
+    // bukan memancar dari tengah seperti riak kolam.
+    asalX = w * -0.12;
+    asalY = h * 0.18;
+  }
+
+  function gambar(t) {
+    ctx.clearRect(0, 0, w, h);
+    const maks = Math.hypot(w - asalX, h - asalY);
+
+    for (let i = 0; i < JUMLAH; i++) {
+      const r = ((t * KECEPATAN + i * JARAK) % (maks + JARAK));
+      if (r < 1) continue;
+
+      // Meredup seiring jarak — energinya tersebar pada keliling yang membesar.
+      const pudar = Math.max(0, 1 - r / maks);
+      const alpha = pudar * pudar * 0.16;
+      if (alpha < 0.004) continue;
+
+      // Warna bergeser sepanjang lintasan: ungu di dekat sumber, sian di
+      // tengah, kuning saat mendekati tujuan.
+      const p = r / maks;
+      const warna = p < 0.5
+        ? `rgba(139, 123, 247, ${alpha})`
+        : p < 0.8
+          ? `rgba(76, 201, 240, ${alpha})`
+          : `rgba(244, 162, 97, ${alpha})`;
+
+      ctx.beginPath();
+      ctx.arc(asalX, asalY, r, 0, Math.PI * 2);
+      ctx.strokeStyle = warna;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  ukur();
+  addEventListener('resize', ukur, { passive: true });
+
+  if (kurangiGerak) { gambar(2600); return; }
+
+  let terakhir = 0;
+  const INTERVAL = 1000 / 24;
+  (function bingkai(t) {
+    if (t - terakhir >= INTERVAL) { gambar(t); terakhir = t; }
+    requestAnimationFrame(bingkai);
+  })(0);
+}
+
 // ── Cangkang aplikasi ────────────────────────────────────────────────────────
 
 /**
@@ -332,14 +417,27 @@ export function pasangHeader(halamanAktif = '') {
 
   const header = document.createElement('header');
   header.className = 'app-header';
+
+  // Tanda: satu titik sumber dengan muka gelombang yang memancar dan meredup —
+  // ringkasan dari keseluruhan gagasan desainnya. Warnanya mengikuti gradien
+  // sinyal, jadi tandanya sendiri menunjukkan dua ujung sebuah koneksi.
   header.innerHTML = `
     <a class="wordmark" href="/" aria-label="AetherDesk — beranda">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-        <circle cx="4" cy="14" r="1.6" fill="currentColor"/>
-        <path d="M4 9.4A4.6 4.6 0 0 1 8.6 14" stroke="currentColor"
-              stroke-width="1.6" stroke-linecap="round"/>
-        <path d="M4 4.8A9.2 9.2 0 0 1 13.2 14" stroke="currentColor"
-              stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="wm" x1="0" y1="20" x2="20" y2="0">
+            <stop offset="0%" stop-color="#8b7bf7"/>
+            <stop offset="55%" stop-color="#4cc9f0"/>
+            <stop offset="100%" stop-color="#f4a261"/>
+          </linearGradient>
+        </defs>
+        <circle cx="3.5" cy="16.5" r="2" fill="url(#wm)"/>
+        <path d="M3.5 11.5a5 5 0 0 1 5 5" stroke="url(#wm)" stroke-width="1.7"
+              stroke-linecap="round"/>
+        <path d="M3.5 6.5a10 10 0 0 1 10 10" stroke="url(#wm)" stroke-width="1.7"
+              stroke-linecap="round" opacity=".6"/>
+        <path d="M3.5 1.5a15 15 0 0 1 15 15" stroke="url(#wm)" stroke-width="1.7"
+              stroke-linecap="round" opacity=".28"/>
       </svg>
       AetherDesk
     </a>
@@ -350,6 +448,7 @@ export function pasangHeader(halamanAktif = '') {
     </nav>`;
 
   document.body.prepend(header);
+  pasangMedan();
 }
 
 // ── Utilitas tampilan ────────────────────────────────────────────────────────

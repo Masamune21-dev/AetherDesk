@@ -5,37 +5,35 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk</title>
-<link rel="stylesheet" href="/style.css?v=6">
+<link rel="stylesheet" href="/style.css?v=7">
 </head>
 <body>
 <div class="wrap">
-  <div class="judul-halaman">
-    <div class="eyebrow">Fase 0 · Control Plane</div>
-    <h1>Akses jarak jauh, tanpa memasang apa pun</h1>
-    <p>Bagikan layar dari satu browser, sambungkan dari browser lain memakai
-       Device ID dan kata sandi sekali pakai.</p>
-  </div>
+  <header class="hero">
+    <span class="eyebrow">Fase 0 · Control Plane</span>
+    <h1>Layar Anda, <em>menyeberangi jarak</em></h1>
+    <p>Bagikan layar dari satu browser dan sambungkan dari browser lain.
+       Tanpa memasang apa pun, tanpa membuka satu port pun di jaringan Anda.</p>
+  </header>
 
-  <section class="card">
-    <h2>Mulai</h2>
-    <div class="nav-grid">
-      <a class="nav-card" href="/agent">
-        <span class="judul">Bagikan layar</span>
-        <span class="ket">Jadikan perangkat ini yang diakses</span>
-      </a>
-      <a class="nav-card" href="/viewer">
-        <span class="judul">Hubungkan</span>
-        <span class="ket">Akses perangkat lain lewat Device ID</span>
-      </a>
-      <a class="nav-card" href="/setup">
-        <span class="judul">Penyiapan</span>
-        <span class="ket">Buat organisasi pertama</span>
-      </a>
-    </div>
-    <p class="kecil">Buka <b>Bagikan layar</b> di satu perangkat dan
-       <b>Hubungkan</b> di perangkat lain. Kata sandi sesi berganti setiap kali
-       sesi berakhir.</p>
+  <section class="jalur">
+    <a class="jalur-kartu" href="/agent">
+      <span class="nomor">Ujung A · sumber</span>
+      <span class="judul">Bagikan layar</span>
+      <span class="ket">Jadikan perangkat ini yang diakses. Anda menerima
+        Device ID dan kata sandi sekali pakai untuk dibacakan.</span>
+    </a>
+    <a class="jalur-kartu" href="/viewer">
+      <span class="nomor">Ujung B · tujuan</span>
+      <span class="judul">Hubungkan</span>
+      <span class="ket">Masukkan Device ID dan kata sandi, lalu tunggu
+        persetujuan dari sisi sana.</span>
+    </a>
   </section>
+
+  <p class="kecil">Belum punya organisasi? <a href="/setup">Buat yang pertama</a>.
+     Kata sandi sesi berganti setiap kali sesi berakhir, jadi yang sempat bocor
+     tidak lagi berlaku.</p>
 
   <section class="card">
     <div class="card-head">
@@ -88,7 +86,7 @@
 </div>
 
 <script type="module">
-import { pasangHeader } from '/app.js?v=6';
+import { pasangHeader } from '/app.js?v=7';
 pasangHeader('/');
 
 const set = (el, kelas, teks) => { el.className = 'badge ' + kelas; el.textContent = teks; };

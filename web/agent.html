@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>Bagikan layar — AetherDesk</title>
-<link rel="stylesheet" href="/style.css?v=6">
+<link rel="stylesheet" href="/style.css?v=7">
 </head>
 <body>
 <div class="wrap">
@@ -81,6 +81,7 @@
 
 <!-- ── Dialog persetujuan (QUICK_CONNECT.md §4.1) ──────────────────────────── -->
 <dialog id="dlgSetuju">
+  <div class="pita"></div>
   <div class="isi">
     <h2>Permintaan akses</h2>
     <dl class="rincian">
@@ -104,7 +105,7 @@
 <script type="module">
 import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
          Signal, Kanal, jelaskanKegagalan, pasangHeader, salin,
-         $, status, kelompokkan } from '/app.js?v=6';
+         $, status, kelompokkan } from '/app.js?v=7';
 
 pasangHeader('/agent');
 
@@ -252,6 +253,7 @@ $('#btnBagikan').onclick = async () => {
     await signal.hubungkan();
     status(el, '', 'ok');
     lencana('ok', 'siap menerima');
+    document.querySelectorAll('.kotak-kredensial').forEach((k) => k.classList.add('hidup'));
     $('#btnBagikan').disabled = true;
   } catch (e) { status(el, e.message, 'bad'); }
 };
@@ -344,6 +346,7 @@ function hentikan() {
   tampil($('#kartuPratinjau'), false);
   $('#btnBagikan').disabled = false;
   lencana('netral', 'belum berbagi');
+  document.querySelectorAll('.kotak-kredensial').forEach((k) => k.classList.remove('hidup'));
   status($('#statusAgent'), 'berbagi layar dihentikan', 'wait');
 }
 

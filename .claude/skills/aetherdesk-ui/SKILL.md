@@ -10,6 +10,27 @@ keseragaman, melainkan agar antarmuka ini terbaca sebagai **satu produk yang
 dapat dipercaya** — karena yang diminta darinya adalah menyerahkan layar sendiri
 kepada orang lain.
 
+## 0. Arah: sinyal yang merambat melintasi medium
+
+Aether adalah medium klasik tempat cahaya dipercaya merambat — zat tak
+kasatmata yang mengisi ruang. Nama produk ini secara harfiah berarti *medium
+transmisi*, dan itulah yang dipinjam seluruh antarmukanya.
+
+Konsekuensinya konkret, bukan puitis:
+
+- **Latar adalah ruang gelap**, bukan sekadar tema gelap. Nyaris tanpa cahaya
+  sendiri; yang menyala hanyalah sinyal yang menyeberanginya.
+- **Gradien sinyal** ungu → sian → kuning mewakili dua ujung koneksi beserta
+  lintasan di antaranya. Ia hanya muncul pada elemen yang memang berbicara
+  tentang koneksi: tanda, garis di bawah header, tepi kredensial, tepi atas
+  panggung video, dan tombol primer. **Tidak pernah** sebagai latar besar.
+- **Monospace adalah suara utama**, bukan sekadar untuk kode. Ini alat
+  instrumentasi; angka-angkanya dibacakan lewat telepon dan dibaca dari HUD.
+  Sans hanya dipakai untuk prosa.
+- **Medan aether** — muka gelombang sepusat yang merambat pelan dari titik di
+  luar tepi kiri-atas. Satu-satunya gerakan di seluruh antarmuka. Bukan hujan
+  partikel: yang digambar adalah hal yang benar-benar dilakukan produk ini.
+
 ## 1. Sikap desain
 
 AetherDesk adalah alat teknis yang dipakai pada saat orang sedang panik: layar
@@ -30,34 +51,49 @@ Seluruh warna berasal dari token. Jangan pernah menulis nilai heks langsung di
 komponen.
 
 ```css
---bg          #0B1016   /* dasar, biru-hitam dalam — bukan hitam murni */
---surface     #131B24   /* kartu */
---surface-2   #1A2530   /* elemen terangkat di atas kartu */
---line        #223040   /* pembatas */
---line-strong #35485A   /* pembatas yang perlu terlihat */
+/* Medium — ruang gelap tempat sinyal merambat */
+--void       #07080D
+--bg         #0A0C13
+--surface    #10131C
+--surface-2  #161A26
+--surface-3  #1D2231
+--line       #1E2331
+--line-2     #2B3145
+--line-lit   #3D4560
 
---ink         #E6EDF3   /* teks utama */
---ink-2       #A3B4C4   /* teks sekunder */
---ink-3       #6E8296   /* label, keterangan */
+/* Cahaya */
+--ink        #EEF1F8
+--ink-2      #9AA3BD
+--ink-3      #626C88
 
---accent      #58B0E3   /* interaktif, tautan, fokus */
---accent-ink  #06121B   /* teks di atas accent */
---accent-dim  #16283A   /* latar lembut accent */
+/* Sinyal — dua ujung koneksi dan lintasannya */
+--signal-a   #8B7BF7   /* ungu — sumber */
+--signal-b   #4CC9F0   /* sian — lintasan, sekaligus warna interaktif */
+--signal-c   #F4A261   /* kuning — tujuan */
 
---ok          #4BC08A   /* tersambung, sehat */
---warn        #E0A85C   /* menunggu, perlu perhatian */
---bad         #E8837C   /* gagal, ditolak */
+--ok         #3DDC97
+--warn       #F4A261
+--bad        #FF6B6B
 ```
 
-Warna semantik (`ok`/`warn`/`bad`) **terpisah** dari accent. Sebuah tombol
-primer tidak pernah hijau hanya karena hasilnya bagus.
+Warna semantik (`ok`/`warn`/`bad`) **terpisah** dari gradien sinyal. Sebuah
+tombol primer tidak pernah hijau hanya karena hasilnya bagus.
+
+Kedalaman dibangun dari nilai permukaan dan sorot setipis rambut di tepi atas
+panel — seperti cahaya yang tersangkut di sisi sebuah lempeng. **Bukan** dari
+bayangan yang di-blur.
 
 ## 3. Tipografi
 
 ```css
+--mono  ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, monospace
 --sans  ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif
---mono  ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace
 ```
+
+**Monospace adalah suara utama.** Judul, label, tombol, lencana, dan seluruh
+angka memakainya. Sans hanya untuk prosa yang benar-benar dibaca sebagai
+kalimat. Ini membalik kebiasaan umum, dan disengaja: produk ini adalah alat
+instrumentasi, bukan halaman pemasaran.
 
 Skala tetap. Jangan menyisipkan ukuran di antaranya:
 
