@@ -189,17 +189,74 @@ panel, bukan angka yang sudah diperkecil.
 
 ---
 
-## 7. Berikutnya setelah ini berhasil
+## 7. Mendaftarkan mesin ini ke server
+
+Agent memerlukan identitasnya sendiri. Ia **tidak** memakai email dan password
+Anda: mesin tanpa pengawasan yang menyimpan kredensial manusia berarti satu
+mesin yang dibongkar membocorkan seluruh akun.
+
+### 7.1 Terbitkan token enrolment
+
+Dari dashboard, atau langsung lewat API memakai token pengguna Anda:
+
+```powershell
+curl -X POST https://aetherdesk.masamune.my.id/api/v1/devices/enrolment-tokens `
+     -H "Authorization: Bearer <TOKEN-PENGGUNA>" `
+     -H "Content-Type: application/json" `
+     -d '{\"alias\":\"PC Kantor\"}'
+```
+
+Token berlaku satu jam dan **sekali pakai**.
+
+### 7.2 Daftarkan
+
+```powershell
+.\target\release\rdp-agent.exe enrol --token <TOKEN> --alias "PC Kantor"
+```
+
+Keluarannya memuat device ID dan password sesi. **Password sesi hanya
+ditampilkan sekali** — setelah itu hanya hash-nya yang tersimpan.
+
+Identitas disimpan di `%APPDATA%\masamune\aetherdesk\config`:
+
+| Berkas | Isi |
+|---|---|
+| `device.json` | UUID, device ID, alamat server |
+| `device.key` | seed privat Ed25519 — **rahasia** |
+
+Kunci privat tidak pernah dikirim ke server. Server hanya menyimpan kunci
+publiknya.
+
+> ⚠ Pada Windows, `device.key` mengandalkan ACL bawaan direktori profil
+> pengguna. Itu membatasi akses ke pemilik dan administrator, tetapi **bukan**
+> padanan `chmod 600`. Pengetatan yang sesungguhnya menyusul bersama service
+> Windows (ADR-010), saat kunci pindah ke penyimpanan milik LocalSystem.
+
+### 7.3 Jalankan
+
+```powershell
+.\target\release\rdp-agent.exe connect
+```
+
+Perangkat akan tampil **online** di dashboard. Periksa identitas kapan saja
+dengan `rdp-agent status`.
+
+Permintaan sesi yang masuk saat ini ditolak dengan alasan tertulis — capture
+layar baru ada di M2.
+
+---
+
+## 8. Berikutnya
 
 Sesuai `docs/NEXT_PLAN.md`:
 
-| Tahap | Isi |
-|---|---|
-| **M1 sisanya** | Identitas perangkat Ed25519, registrasi, heartbeat, signaling |
-| **M2** | Capture DXGI Desktop Duplication, encode H.264 |
-| **M3** | `MONITOR_LAYOUT`, perpindahan monitor, thumbnail |
-| **M4** | Injeksi input `SendInput` dengan scancode |
-| **M5** | Pengerasan: tingkat izin, indikator, pintasan putus |
+| Tahap | Isi | Keadaan |
+|---|---|---|
+| **M1** | Enumerasi monitor, identitas Ed25519, enrolment, heartbeat, signaling | **selesai** |
+| **M2** | Capture DXGI Desktop Duplication, encode H.264 | berikutnya |
+| **M3** | `MONITOR_LAYOUT`, perpindahan monitor, thumbnail | |
+| **M4** | Injeksi input `SendInput` dengan scancode | |
+| **M5** | Pengerasan: tingkat izin, indikator, pintasan putus | |
 
 Yang belum ada dan akan menghambat di M6: sertifikat code signing. Sejak
 Juni 2023 kunci privatnya wajib berada di perangkat keras bersertifikasi FIPS,

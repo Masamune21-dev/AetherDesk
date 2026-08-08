@@ -149,21 +149,150 @@ posisi dalam daftar.
 **Skala ≠ 100% belum pernah diuji.** Kedua monitor mesin uji memakai 100%, jadi
 jalur DPI benar secara konstruksi tetapi belum terbukti secara empiris.
 
+**34. Identitas perangkat Ed25519 — M1 selesai**
+
+Penghalangnya jelas sejak awal: `POST /api/v1/devices` mewajibkan JWT
+**pengguna**, dan `Masuk::Auth` di `rdp-signal` juga menerima token pengguna.
+Agent tanpa pengawasan yang menyimpan kredensial manusia berarti satu mesin
+yang dibongkar membocorkan satu akun beserta seluruh armada organisasinya.
+
+Alurnya sekarang tiga langkah, dan dua di antaranya sengaja tanpa sesi manusia:
+
+| Langkah | Endpoint | Kredensial |
+|---|---|---|
+| Terbitkan token | `POST /devices/enrolment-tokens` | JWT pengguna |
+| Tukar jadi perangkat | `POST /devices/enrol` | token enrolment sekali pakai |
+| Buktikan diri | `POST /devices/token` | tanda tangan kunci perangkat |
+| Detak | `POST /devices/heartbeat` | JWT perangkat |
+
+Kunci privat tidak pernah meninggalkan mesin agent.
+
+**35. Tabel yang hampir saya duplikasi**
+
+Rancangan pertama menambahkan kolom `public_key` ke `devices`. Survei server
+menunjukkan **`device_keys` sudah ada sejak migrasi 0001** — kosong, tetapi
+dirancang persis untuk ini, lengkap dengan `is_active` untuk rotasi dan
+`revoked_at` untuk pencabutan. Kolom baru di `devices` akan menduplikasinya
+sekaligus membuang kemampuan itu.
+
+Yang perlu disesuaikan hanya `certificate`, yang semula `NOT NULL`. Fase 0
+belum punya CA, dan ADR-008 mensyaratkan tanda tangan kunci perangkat — bukan
+rantai sertifikat. Memaksanya terisi hanya menghasilkan string kosong yang
+berpura-pura menjadi sertifikat, jadi kolomnya dijadikan nullable.
+
+Ikut ditutup: **`device_keys` tidak pernah diberi RLS** di migrasi 0001.
+Selama tabelnya kosong itu tidak berakibat apa-apa; begitu enrolment mengisinya,
+`aetherdesk_app` dapat membaca kunci milik seluruh organisasi. Diberi policy
+sekarang, sebelum ada baris pertama.
+
+**36. Empat keputusan keamanan yang layak dicatat**
+
+**Tantangan diberi awalan domain** `aetherdesk-device-auth:v1`. ADR-008
+mewajibkan kunci yang sama kelak menandatangani SDP. Tanpa pemisahan domain,
+tanda tangan yang dikumpulkan dari satu alur dapat diputar ulang sebagai tanda
+tangan sah di alur lain.
+
+**Pembentukan tantangan hidup di `rdp-core`**, bukan diduplikasi di kedua sisi.
+Penanda tangan dan pemverifikasi yang membangun byte berbeda menghasilkan bug
+yang gejalanya hanya "tanda tangan ditolak", tanpa petunjuk sisi mana yang
+keliru.
+
+**`Terautentikasi` kini menolak token perangkat.** Keduanya ditandatangani
+kunci yang sama dan sama-sama lolos verifikasi kriptografis. Tanpa pemeriksaan
+jenis, agent mana pun dapat menerbitkan token enrolment dan membuka sesi ke
+perangkat lain — satu mesin tersusupi menjadi pijakan ke seluruh organisasi.
+
+**Nonce diklaim sebelum tanda tangan diverifikasi.** Yang dilindungi adalah
+pemutaran ulang request yang tanda tangannya memang sah; mencatat nonce setelah
+verifikasi berhasil membiarkan request tersadap dikirim ulang selama jendela
+stempel waktu masih terbuka.
+
+**37. Heartbeat sengaja tidak menyentuh `status`**
+
+Kehadiran dimiliki Signal Server, yang menandai offline seketika saat WebSocket
+putus (butir 20, temuan S-09). Bila heartbeat ikut menulis `'online'`, agent
+yang koneksinya baru putus akan menghidupkan kembali statusnya pada detak
+berikutnya — persis bug yang sudah diperbaiki, kembali lewat pintu lain.
+
+Yang dicatat heartbeat adalah keterjangkauan dan metadata.
+
+**38. Bug di migrasi, ditemukan uji fungsional**
+
+Migrasi diuji terhadap **salinan skema produksi** di basis data terpisah,
+bukan langsung di produksi. Uji pertama langsung gagal:
+
+```
+ERROR: new row for relation "device_enrolment_tokens" violates check
+constraint "enrolment_terpakai_punya_perangkat"
+CONTEXT: SQL function "claim_enrolment_token"
+```
+
+Constraint aslinya menuliskan kesetaraan `(used_at IS NULL) = (device_uuid IS
+NULL)`, yang membuat `claim_enrolment_token` **mustahil dijalankan** — token
+diklaim lebih dulu, perangkatnya baru dibuat sesudahnya. Saya menulis komentar
+yang menjelaskan mengapa penautan harus terpisah, lalu memasang constraint yang
+melarang persis keadaan antara itu.
+
+Diperbaiki menjadi implikasi satu arah. Keadaan `used_at IS NOT NULL AND
+device_uuid IS NULL` juga bukan sekadar transisi sesaat: bila pembuatan
+perangkat gagal setelah token diklaim, itulah keadaan akhir yang benar — token
+sudah habis dan tidak boleh dapat dipakai ulang, justru karena percobaannya
+pernah terjadi.
+
+Setelah perbaikan: **15 uji perilaku lulus**, mencakup sekali pakai, token
+kedaluwarsa, tabrakan device ID, kunci tercabut, heartbeat lintas organisasi,
+dan indeks unik kunci publik.
+
+**39. Deploy ke produksi**
+
+| Langkah | Hasil |
+|---|---|
+| Backup `pg_dump -Fc` + biner lama | 109 KB, tersimpan di `/root/backup-aetherdesk` |
+| Migrasi 0005 ke produksi | OK — layanan **lama** tetap 200 selama migrasi |
+| Build `rdp-api` + `rdp-signal` di server | 58 detik |
+| Restart kedua layanan | aktif, `/api/health/ready` postgres + redis OK |
+
+Migrasi aditif, jadi biner lama tetap berjalan di atas skema baru — itulah yang
+membuat urutan "migrasi dulu, biner kemudian" aman.
+
+**40. Uji ujung ke ujung — PC Windows ini terdaftar di produksi**
+
+Bukan simulasi: agent sungguhan, lewat Cloudflare, ke server produksi.
+
+```
+Device ID        543 096 477
+Kunci publik     4LFG2NAQnFUHVdxuzYcEDZUaJ8gGaoStLE2trAq-w9s
+Hostname         DESKTOP-9VLA031
+```
+
+| Uji | Hasil |
+|---|---|
+| Ketiga endpoint baru tanpa kredensial | **401**, pesan seragam |
+| `enrol` lewat `https://` | perangkat + kunci terbuat |
+| Token enrolment dipakai kedua kali | ditolak |
+| `connect` lewat `wss://` | terautentikasi sebagai agent |
+| Status perangkat | **online** |
+| Heartbeat | tepat 60 detik, `client_version 0.1.0` |
+| `certificate` | NULL, sesuai rancangan |
+| Audit `device.enrol` | `user_id` **NULL** — tidak ada manusia di baliknya |
+| Agent dihentikan | **offline seketika**, bukan menunggu TTL |
+
 ### Keadaan M1
 
 | Bagian | Keadaan |
 |---|---|
 | Enumerasi monitor | **selesai dan terverifikasi** |
-| Identitas perangkat Ed25519 | belum |
-| Registrasi ke `POST /api/v1/devices` | belum |
-| Heartbeat | belum |
-| Koneksi signaling | belum |
+| Identitas perangkat Ed25519 | **selesai** |
+| Enrolment dan registrasi | **selesai** |
+| Heartbeat | **selesai** |
+| Koneksi signaling | **selesai** |
 
-Catatan untuk bagian yang belum: `POST /api/v1/devices` sekarang mewajibkan JWT
-**pengguna**, dan `Masuk::Auth` di `rdp-signal` juga menerima token pengguna.
-Artinya agent perlu satu bentuk kredensial miliknya sendiri — token enrolment
-atau kunci perangkat — dan itu **perubahan sisi server**, bukan hanya pekerjaan
-di crate agent.
+M1 selesai. Berikutnya M2 — capture DXGI Desktop Duplication.
+
+Permintaan sesi yang masuk sekarang **ditolak dengan alasan tertulis**
+("belum mendukung berbagi layar (M2)"), bukan didiamkan. Viewer yang menunggu
+tanpa jawaban jauh lebih membingungkan daripada penolakan yang menyebut
+sebabnya.
 
 ---
 

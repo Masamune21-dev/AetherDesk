@@ -267,13 +267,23 @@ Seluruhnya lewat WebRTC DataChannel yang sudah berjalan, bukan lewat server.
 
 Setiap tahap menghasilkan sesuatu yang dapat dicoba, bukan hanya kode.
 
-### M1 — Kerangka agent native
+### M1 — Kerangka agent native — **SELESAI** (2026-08-09)
 
 Registrasi perangkat memakai kunci Ed25519, heartbeat, koneksi signaling.
 Belum ada capture.
 
 **Dapat dicoba:** perangkat muncul online di dashboard, dan Quick Connect
 menemukannya.
+
+Terverifikasi di produksi pada perangkat `543 096 477`: enrolment lewat
+`https://`, signaling lewat `wss://`, status online, heartbeat 60 detik, dan
+offline seketika saat agent dihentikan.
+
+Enrolment memakai token sekali pakai — bukan kredensial pengguna — sehingga
+agent tanpa pengawasan tidak pernah menyimpan rahasia milik manusia. Rinciannya
+di worklog butir 34–40.
+
+Permintaan sesi ditolak dengan alasan tertulis sampai M2 ada.
 
 ### M2 — Capture satu monitor
 
