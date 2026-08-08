@@ -106,25 +106,82 @@ SSL kosong    /etc/ssl/cloudflare/aetherdesk.masamune.my.id.pem  (0644 root)
 
 Belum ada satu pun perubahan pada nginx. Dua situs produksi tidak tersentuh.
 
+**6. Push ke GitHub — berhasil**
+
+Deploy key ternyata sudah terdaftar di akun. Repo:
+<https://github.com/Masamune21-dev/AetherDesk>, branch `main`.
+
+**7. Koreksi temuan IP origin — `.88` ternyata masih benar**
+
+Setelah melihat dashboard Cloudflare: record `vid.masamune.my.id` memang masih
+memakai `103.189.249.88` dan situsnya jalan normal. Kesimpulannya router mem-forward
+beberapa IP publik ke host internal yang sama:
+
+| Domain | IP origin | Menuju |
+|---|---|---|
+| `masamune.my.id` | `103.189.249.83` | `192.168.99.63` |
+| `vid.masamune.my.id` | `103.189.249.88` | `192.168.99.63` |
+| `aetherdesk.masamune.my.id` | `103.189.249.88` | `192.168.99.63` |
+
+Komentar "old origin" pada vhost `vid` merujuk pada perpindahan *host internal*
+(`192.168.99.58` → `.63`), bukan perubahan IP publik. Record `aetherdesk` sudah benar.
+
+**8. Sertifikat SSL diverifikasi**
+
+```
+SAN         DNS:aetherdesk.masamune.my.id
+Issuer      CloudFlare Origin SSL Certificate Authority
+Berlaku     8 Agu 2026 → 4 Agu 2041
+Key match   cocok (MD5 pubkey cert == MD5 pubkey key)
+```
+
+**9. vhost nginx aktif — situs live**
+
+File `/etc/nginx/sites-available/aetherdesk` → symlink ke `sites-enabled/`.
+Urutan aman dipatuhi: tulis → symlink → `nginx -t` → baru `reload`.
+
+| Rute | Tujuan |
+|---|---|
+| `/` | SPA statis dengan fallback `index.html` |
+| `/api/` | `127.0.0.1:8080` |
+| `/ws` | `127.0.0.1:8081`, header Upgrade, timeout 3600s |
+| `/nginx-health` | 200 `nginx-ok`, tanpa access log |
+
+Verifikasi:
+
+| Uji | Hasil |
+|---|---|
+| `https://aetherdesk.masamune.my.id/` lewat Cloudflare | **200** (cf-ray edge SIN) |
+| `/nginx-health` lewat Cloudflare | **200** `nginx-ok` |
+| `/api/health` | 502 — wajar, `rdp-api` belum ada |
+| **Regresi** `masamune.my.id` | **200** |
+| **Regresi** `vid.masamune.my.id` | **200** |
+
+Halaman status sementara terpasang di `dashboard/index.html` — memeriksa ketiga
+komponen tiap 5 detik, jadi kemajuan deploy terlihat langsung dari browser.
+
+**10. Dependensi terpasang**
+
+| Komponen | Versi | Bind | Catatan |
+|---|---|---|---|
+| PostgreSQL | 16.14 (PGDG) | `127.0.0.1:5432` | Ubuntu 22.04 hanya menyediakan PG14, jadi repo PGDG ditambahkan |
+| Redis | 6.0.16 (Ubuntu) | `127.0.0.1:6379` | **Menyimpang dari dokumen** yang menyebut Redis 7 — Fase 0 hanya memakai SET/GET/EXPIRE/pubsub, tidak ada fitur 7.x yang dibutuhkan |
+| build-essential, pkg-config, libssl-dev | — | — | prasyarat kompilasi Rust |
+
+Database `aetherdesk` dan role `aetherdesk` dibuat, Redis diberi `requirepass`.
+Kredensial acak 32 karakter ditulis ke `env/aetherdesk.env` mode `0600`,
+diblokir `.gitignore`. Keduanya diuji: `PostgreSQL 16.14` dan `PONG`.
+
 ### Menunggu Anda
 
-| # | Tindakan | Kenapa memblokir |
-|---|---|---|
-| 1 | Tambahkan deploy key ke repo GitHub (Settings → Deploy keys, centang *Allow write access*) | Tanpa ini push tidak bisa dilakukan |
-| 2 | Tempel Cloudflare Origin Certificate ke dua file SSL yang sudah disiapkan | nginx menolak `ssl_certificate` kosong; mengaktifkan vhost sebelum ini terisi akan menjatuhkan dua situs produksi |
-| 3 | Buat A record `aetherdesk` di Cloudflare — **salin IP origin dari record `vid`**, jangan pakai `.88` | Lihat temuan IP di bawah |
-
-Kunci untuk langkah 1:
-
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINg0C3lMaddFcO44fuYHE8i0aheYGNcaheI3eecnPPvV masamunekazuto21@gmail.com
-```
+Tidak ada. Semua yang perlu Anda lakukan sudah selesai.
 
 ### Berikutnya dari saya
 
-1. Pasang PostgreSQL 16, Redis 7, dan Rust toolchain di server
-2. Scaffold workspace Rust: `rdp-core`, `rdp-api`, `rdp-signal`
-3. Skema database awal dengan perbaikan T-05 s/d T-08 sudah diterapkan sejak migrasi pertama
+1. Scaffold workspace Rust: `rdp-core`, `rdp-api`, `rdp-signal`
+2. Migrasi database awal — perbaikan T-05 s/d T-08 diterapkan sejak migrasi pertama,
+   bukan ditambal belakangan
+3. Dashboard Vue 3 + agent/viewer berbasis browser
 4. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
 
 ### Catatan operasional
