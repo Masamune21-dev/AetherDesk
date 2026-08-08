@@ -54,6 +54,7 @@ Operasional:
 
 | Dokumen | Isi |
 |---|---|
+| [NEXT_PLAN.md](./docs/NEXT_PLAN.md) | **Rencana berikutnya** — kendali penuh, multi-monitor, agent native |
 | [DEPLOYMENT_PLAN.md](./docs/DEPLOYMENT_PLAN.md) | **Rencana deploy Fase 0 yang sedang dijalankan** — server, nginx, DNS, SSL |
 | [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Topologi Kubernetes untuk skala penuh (belum dijalankan) |
 | [DEVOPS.md](./docs/DEVOPS.md) | Pipeline CI/CD, code signing, distribusi rilis |
