@@ -54,6 +54,7 @@ Operasional:
 
 | Dokumen | Isi |
 |---|---|
+| [BUILD_WINDOWS.md](./docs/BUILD_WINDOWS.md) | **Panduan build agent di PC Windows** |
 | [NEXT_PLAN.md](./docs/NEXT_PLAN.md) | **Rencana berikutnya** — kendali penuh, multi-monitor, agent native |
 | [DEPLOYMENT_PLAN.md](./docs/DEPLOYMENT_PLAN.md) | **Rencana deploy Fase 0 yang sedang dijalankan** — server, nginx, DNS, SSL |
 | [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | Topologi Kubernetes untuk skala penuh (belum dijalankan) |

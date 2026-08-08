@@ -4,6 +4,7 @@ members = [
     "crates/rdp-core",
     "crates/rdp-api",
     "crates/rdp-signal",
+    "crates/rdp-agent",
 ]
 
 [workspace.package]
