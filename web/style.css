@@ -205,7 +205,21 @@ body {
   gap: var(--s6);
 }
 
+/* Lebar wadah mengikuti tahapan, bukan halamannya.
+ *
+ * Saat pengguna masih mengisi formulir, kolom sempit lebih mudah dibaca dan
+ * terasa terpusat. Begitu layar remote muncul, wadah melebar untuk memberi
+ * ruang sebesar mungkin kepada gambar — yang memang isi sesungguhnya. */
 .wrap.lebar { max-width: 76rem; }
+
+/* Kartu yang lebih sempit dari wadahnya harus dipusatkan sendiri. Tanpa
+   `margin-inline: auto`, `max-width` membuatnya menempel ke tepi kiri karena
+   flex item merapat ke awal sumbu. */
+.card.sempit {
+  width: 100%;
+  max-width: 34rem;
+  margin-inline: auto;
+}
 
 /* ── Hero ────────────────────────────────────────────────────────────────── */
 
@@ -255,6 +269,13 @@ body {
 }
 
 .judul-halaman { display: flex; flex-direction: column; gap: var(--s3); }
+
+/* Judul yang menaungi kartu sempit ikut menyempit, agar keduanya berbagi
+   sumbu yang sama alih-alih tampak melayang terpisah. Saat wadah melebar
+   karena layar remote muncul, batas itu dilepas — gambar berhak atas seluruh
+   ruang yang tersedia. */
+.judul-halaman.sempit-judul { width: 100%; max-width: 34rem; margin-inline: auto; }
+.wrap.lebar .judul-halaman.sempit-judul { max-width: none; }
 
 h1 {
   margin: 0;

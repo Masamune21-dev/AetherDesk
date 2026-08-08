@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>Hubungkan — AetherDesk</title>
-<link rel="stylesheet" href="/style.css?v=8">
+<link rel="stylesheet" href="/style.css?v=9">
 </head>
 <body>
-<div class="wrap lebar">
-  <div class="judul-halaman">
-    <div class="eyebrow">Viewer · Quick Connect</div>
+<div class="wrap" id="wadah">
+  <div class="judul-halaman sempit-judul">
+    <span class="eyebrow">Viewer · Quick Connect</span>
     <h1>Hubungkan ke perangkat</h1>
   </div>
 
   <!-- ── Masuk ────────────────────────────────────────────────────────────── -->
-  <section class="card" id="kartuMasuk" style="max-width:34rem">
+  <section class="card sempit" id="kartuMasuk">
     <h2>Masuk</h2>
     <div class="field">
       <label for="slug">Organisasi</label>
@@ -34,7 +34,7 @@
   </section>
 
   <!-- ── Quick Connect ────────────────────────────────────────────────────── -->
-  <section class="card" id="kartuConnect" hidden style="max-width:34rem">
+  <section class="card sempit" id="kartuConnect" hidden>
     <h2>Quick Connect</h2>
     <p class="kecil">Masukkan Device ID dan kata sandi yang ditampilkan pada
        perangkat yang akan diakses.</p>
@@ -82,7 +82,7 @@
 <script type="module">
 import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
          Signal, Kanal, jelaskanKegagalan, pasangHeader,
-         $, status, statistik } from '/app.js?v=8';
+         $, status, statistik } from '/app.js?v=9';
 
 pasangHeader('/viewer');
 
@@ -173,6 +173,7 @@ $('#btnHubungkan').onclick = async () => {
     $('#layar').srcObject = e.streams[0];
     tampil($('#kartuConnect'), false);
     tampil($('#kartuSesi'), true);
+    $('#wadah').classList.add('lebar');
     mulaiHud();
   };
 
@@ -245,6 +246,7 @@ function bersihkan() {
   $('#layar').srcObject = null;
   tampil($('#kartuSesi'), false);
   tampil($('#kartuConnect'), true);
+  $('#wadah').classList.remove('lebar');
 }
 
 saatSesiHabis(() => {

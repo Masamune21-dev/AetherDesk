@@ -174,6 +174,18 @@ selektor kelas, dan stylesheet proyek datang belakangan — sehingga
 tampil sekaligus meskipun atribut `hidden` terpasang rapi di HTML. Pernah
 terjadi, dan tidak menghasilkan galat apa pun di konsol.
 
+### 5.7 Lebar wadah mengikuti tahapan
+
+Halaman viewer memakai dua lebar. Selama pengguna mengisi formulir, wadahnya
+sempit — kolom pendek lebih mudah dibaca dan terasa terpusat. Begitu layar
+remote muncul, `.wrap` mendapat kelas `lebar` dan gambar memperoleh seluruh
+ruang yang tersedia.
+
+Kartu yang lebih sempit dari wadahnya **wajib** memakai `.sempit`, yang
+menyertakan `margin-inline: auto`. Tanpa itu, `max-width` saja membuatnya
+menempel ke tepi kiri: flex item merapat ke awal sumbu, dan hasilnya terlihat
+seperti tata letak yang lupa dipusatkan.
+
 ## 6. Aksesibilitas
 
 - Kontras teks utama minimal 4.5:1, teks besar minimal 3:1
