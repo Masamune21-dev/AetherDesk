@@ -1,11 +1,13 @@
 //! Pendaftaran dan pengelolaan perangkat.
 
 use crate::{
+    audit::{self, aksi},
     auth::{hash, Terautentikasi},
     db,
     error::{ApiError, ApiResult, Sukses},
     state::AppState,
 };
+use crate::net::IpKlien;
 use axum::extract::State;
 use chrono::{DateTime, Utc};
 use rdp_core::{password, DeviceId};
@@ -34,6 +36,7 @@ pub struct DaftarResp {
 /// `POST /api/v1/devices`
 pub async fn daftar(
     State(state): State<AppState>,
+    IpKlien(ip): IpKlien,
     Terautentikasi(claims): Terautentikasi,
     axum::Json(req): axum::Json<DaftarReq>,
 ) -> ApiResult<Sukses<DaftarResp>> {
@@ -87,6 +90,13 @@ pub async fn daftar(
     };
 
     tx.commit().await?;
+
+    audit::catat(&state.db, audit::Entri {
+        org_id: claims.org_id(), user_id: Some(claims.user_id()), ip,
+        aksi: aksi::DEVICE_DIDAFTARKAN,
+        payload: Some(serde_json::json!({ "device_id": id.as_str(), "os_type": req.os_type })),
+    }).await;
+
     tracing::info!(org = %claims.org_id(), device = %id, "perangkat terdaftar");
 
     Ok(Sukses::baru(DaftarResp {
@@ -170,6 +180,7 @@ pub struct RotasiResp {
 /// saat pengguna memintanya.
 pub async fn rotasi_password(
     State(state): State<AppState>,
+    IpKlien(ip): IpKlien,
     Terautentikasi(claims): Terautentikasi,
     axum::extract::Path(device_uuid): axum::extract::Path<Uuid>,
 ) -> ApiResult<Sukses<RotasiResp>> {
@@ -194,6 +205,12 @@ pub async fn rotasi_password(
     if terpengaruh == 0 {
         return Err(ApiError::TidakDitemukan("perangkat"));
     }
+
+    audit::catat(&state.db, audit::Entri {
+        org_id: claims.org_id(), user_id: Some(claims.user_id()), ip,
+        aksi: aksi::DEVICE_SANDI_DIROTASI,
+        payload: Some(serde_json::json!({ "device_uuid": device_uuid })),
+    }).await;
 
     tracing::info!(%device_uuid, "password sesi dirotasi");
     Ok(Sukses::baru(RotasiResp {

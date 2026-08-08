@@ -3,6 +3,7 @@
 //! Fase 0: konfigurasi, kolam koneksi, endpoint kesehatan, dan shutdown yang
 //! rapi. Modul domain (auth, devices, sessions) menyusul di atas fondasi ini.
 
+mod audit;
 mod auth;
 mod config;
 mod db;
@@ -96,7 +97,9 @@ async fn main() -> Result<()> {
             post(routes::devices::rotasi_password),
         )
         .route("/connect", post(routes::connect::connect))
-        .route("/turn-credentials", get(routes::turn::kredensial));
+        .route("/turn-credentials", get(routes::turn::kredensial))
+        .route("/sessions", get(routes::sessions::daftar))
+        .route("/audit-logs", get(routes::sessions::audit));
 
     let app = Router::new()
         .nest("/api", operasional)

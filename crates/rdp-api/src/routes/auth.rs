@@ -1,6 +1,7 @@
 //! Endpoint autentikasi.
 
 use crate::{
+    audit::{self, aksi},
     auth::{
         hash,
         jwt::ACCESS_TOKEN_TTL_SECONDS,
@@ -11,6 +12,7 @@ use crate::{
     error::{ApiError, ApiResult, Sukses},
     state::AppState,
 };
+use crate::net::IpKlien;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -40,6 +42,7 @@ pub struct BootstrapResp {
 /// tertutup sendiri begitu instalasi dipakai.
 pub async fn bootstrap(
     State(state): State<AppState>,
+    IpKlien(ip): IpKlien,
     axum::Json(req): axum::Json<BootstrapReq>,
 ) -> ApiResult<Sukses<BootstrapResp>> {
     validasi_slug(&req.org_slug)?;
@@ -84,6 +87,11 @@ pub async fn bootstrap(
 
     tx.commit().await?;
 
+    audit::catat(&state.db, audit::Entri {
+        org_id, user_id: Some(user_id), ip, aksi: aksi::ORG_DIBUAT,
+        payload: Some(serde_json::json!({ "slug": req.org_slug })),
+    }).await;
+
     tracing::info!(%org_id, %user_id, slug = %req.org_slug, "organisasi pertama dibuat");
     Ok(Sukses::baru(BootstrapResp { org_id, user_id }))
 }
@@ -114,6 +122,7 @@ pub struct LoginResp {
 /// `POST /api/v1/auth/login`
 pub async fn login(
     State(state): State<AppState>,
+    IpKlien(ip): IpKlien,
     axum::Json(req): axum::Json<LoginReq>,
 ) -> ApiResult<Sukses<LoginResp>> {
     // Lookup lintas-tenant lewat SECURITY DEFINER — pada titik ini tenant
@@ -135,6 +144,10 @@ pub async fn login(
     };
 
     if !hash::verify(&req.password, &password_hash) {
+        audit::catat(&state.db, audit::Entri {
+            org_id, user_id: Some(user_id), ip, aksi: aksi::LOGIN_GAGAL,
+            payload: Some(serde_json::json!({ "sebab": "password_salah" })),
+        }).await;
         tracing::info!(%org_id, %user_id, "login gagal: password salah");
         return Err(ApiError::KredensialSalah);
     }
@@ -155,6 +168,10 @@ pub async fn login(
         &SesiRefresh { user_id, org_id, email: req.email.clone() },
     )
     .await?;
+
+    audit::catat(&state.db, audit::Entri {
+        org_id, user_id: Some(user_id), ip, aksi: aksi::LOGIN, payload: None,
+    }).await;
 
     tracing::info!(%org_id, %user_id, "login berhasil");
 

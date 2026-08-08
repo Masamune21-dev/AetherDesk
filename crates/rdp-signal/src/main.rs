@@ -8,6 +8,7 @@
 mod auth;
 mod presence;
 mod protocol;
+mod sesi;
 mod registry;
 
 use anyhow::{Context, Result};
@@ -235,6 +236,11 @@ async fn tangani(socket: WebSocket, state: AppState) {
         if let Err(e) = presence::tandai_offline(&state.db, &mut redis, claims.org, dev).await {
             tracing::error!(error = %e, "gagal menandai perangkat offline");
         }
+        // Menutup tab tanpa menekan tombol akhiri adalah cara paling umum
+        // orang mengakhiri sesuatu. Tanpa ini, sesinya menggantung selamanya.
+        if let Err(e) = sesi::akhiri_semua_perangkat(&state.db, claims.org, dev).await {
+            tracing::error!(error = %e, "gagal menutup sesi menggantung");
+        }
     } else {
         state.registri.lepas_viewer(conn_id).await;
     }
@@ -328,9 +334,15 @@ async fn rutekan(
         }
 
         Masuk::SessionAccept { session_id } => {
+            if let Err(e) = sesi::aktifkan(&state.db, claims.org, *session_id).await {
+                tracing::error!(error = %e, "gagal menandai sesi aktif");
+            }
             teruskan!(*session_id, Keluar::SessionAccepted { session_id: *session_id })
         }
         Masuk::SessionReject { session_id, reason } => {
+            if let Err(e) = sesi::akhiri(&state.db, claims.org, *session_id, "ditolak").await {
+                tracing::error!(error = %e, "gagal menutup sesi yang ditolak");
+            }
             teruskan!(
                 *session_id,
                 Keluar::SessionRejected {
@@ -367,6 +379,9 @@ async fn rutekan(
             wajib_peserta!(*session_id);
             if let Some(lawan) = state.registri.lawan(*session_id, dari_viewer).await {
                 kirim(&lawan, &Keluar::SessionEnd { session_id: *session_id });
+            }
+            if let Err(e) = sesi::akhiri(&state.db, claims.org, *session_id, "diakhiri pengguna").await {
+                tracing::error!(error = %e, "gagal menutup sesi");
             }
             state.registri.hapus_sesi(*session_id).await;
         }

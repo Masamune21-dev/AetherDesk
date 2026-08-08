@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk — Agent</title>
-<link rel="stylesheet" href="/style.css?v=4">
+<link rel="stylesheet" href="/style.css?v=5">
 </head>
 <body>
 <div class="wrap">
@@ -97,7 +97,7 @@
 <script type="module">
 import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
          Signal, Kanal, jelaskanKegagalan, $, tampilkan, status, kelompokkan }
-  from '/app.js?v=4';
+  from '/app.js?v=5';
 
 let device = null;      // { device_uuid, device_id, session_password }
 let signal = null;
@@ -121,18 +121,55 @@ $('#btnMasuk').onclick = async () => {
   }
 };
 
+const KUNCI_DEVICE = 'aetherdesk.device';
+
+function tampilkanPerangkat(pesan) {
+  $('#devId').textContent = device.device_id_tampil ?? kelompokkan(device.device_id);
+  $('#devSandi').textContent = device.session_password;
+  tampilkan($('#kartuMasuk'), false);
+  tampilkan($('#kartuDevice'), true);
+  status($('#statusAgent'), pesan, 'wait');
+}
+
+/**
+ * Memakai ulang perangkat yang sudah terdaftar dari browser ini.
+ *
+ * Sebelumnya fungsi ini mendaftarkan perangkat BARU setiap kali halaman
+ * dimuat, sehingga satu mesin menghasilkan tumpukan entri dan Device ID
+ * berubah-ubah — persis yang tidak boleh terjadi pada identitas perangkat.
+ *
+ * Kata sandi sesi tetap dibangkitkan ulang di setiap start, sesuai
+ * QUICK_CONNECT.md §3.1: yang bocor pada sesi sebelumnya tidak lagi berlaku.
+ */
 async function siapkanPerangkat() {
-  const el = $('#statusAgent');
+  let tersimpan = null;
+  try { tersimpan = JSON.parse(localStorage.getItem(KUNCI_DEVICE) || 'null'); } catch { /* rusak */ }
+
+  if (tersimpan?.device_uuid) {
+    try {
+      const r = await api(`/v1/devices/${tersimpan.device_uuid}/rotate-password`, { method: 'POST' });
+      device = { ...tersimpan, session_password: r.session_password };
+      tampilkanPerangkat('perangkat dikenali — belum berbagi layar');
+      return;
+    } catch (e) {
+      // 404 berarti perangkat sudah dihapus dari server; daftar ulang.
+      // Galat lain tidak boleh diam-diam memicu pendaftaran baru.
+      if (e.status !== 404) { status($('#statusMasuk'), e.message, 'bad'); return; }
+      localStorage.removeItem(KUNCI_DEVICE);
+    }
+  }
+
   try {
     device = await api('/v1/devices', {
       method: 'POST',
-      body: { os_type: 'Web', alias: 'Browser agent', hostname: location.hostname },
+      body: { os_type: 'Web', alias: `Browser · ${navigator.platform || 'web'}`, hostname: location.hostname },
     });
-    $('#devId').textContent = device.device_id_tampil ?? kelompokkan(device.device_id);
-    $('#devSandi').textContent = device.session_password;
-    tampilkan($('#kartuMasuk'), false);
-    tampilkan($('#kartuDevice'), true);
-    status(el, 'perangkat terdaftar — belum berbagi layar', 'wait');
+    localStorage.setItem(KUNCI_DEVICE, JSON.stringify({
+      device_uuid: device.device_uuid,
+      device_id: device.device_id,
+      device_id_tampil: device.device_id_tampil,
+    }));
+    tampilkanPerangkat('perangkat terdaftar — belum berbagi layar');
   } catch (e) {
     status($('#statusMasuk'), e.message, 'bad');
   }

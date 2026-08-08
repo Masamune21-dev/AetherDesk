@@ -9,6 +9,7 @@
 //! 4. Setiap upaya dicatat, termasuk yang device ID-nya tidak pernah ada
 
 use crate::{
+    audit::{self, aksi},
     auth::{hash, Terautentikasi},
     error::{ApiError, ApiResult, Sukses},
     net::IpKlien,
@@ -162,6 +163,13 @@ async fn jalankan(
 
     ratelimit::bersihkan(&mut redis, &kunci_device).await?;
     catat(state, &req.device_id, ip, QuickConnectOutcome::Accepted, claims).await;
+    audit::catat(&state.db, audit::Entri {
+        org_id, user_id: Some(claims.user_id()), ip, aksi: aksi::SESI_DIMINTA,
+        payload: Some(serde_json::json!({
+            "session_id": session_id, "device_id": device_id.as_str(),
+        })),
+    }).await;
+
     tracing::info!(device = %device_id, %session_id, "quick connect diterima, menunggu persetujuan");
 
     Ok(Sukses::baru(ConnectResp {

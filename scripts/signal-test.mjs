@@ -91,6 +91,8 @@ ok('token diperoleh');
 
 r = await api('/api/v1/devices', { method: 'POST', token, body: { os_type: 'Web', alias: 'Agent uji' } });
 const deviceUuid = r.body.data.device_uuid;
+const deviceId = r.body.data.device_id;
+const devicePassword = r.body.data.session_password;
 ok(`perangkat terdaftar: ${r.body.data.device_id_tampil}`);
 
 // ── Autentikasi WebSocket ────────────────────────────────────────────────────
@@ -124,7 +126,18 @@ dev?.status === 'online' ? ok('perangkat online saat agent terhubung') : no(`sta
 
 // ── Alur sesi ────────────────────────────────────────────────────────────────
 bab('4. Alur sesi');
-const sessionId = crypto.randomUUID();
+
+// Sesi dibuat lewat /connect seperti viewer sungguhan, bukan dengan UUID
+// karangan. Versi sebelumnya memakai crypto.randomUUID() sehingga tidak ada
+// baris database yang tersentuh — dan siklus hidupnya tidak pernah teruji.
+r = await api('/api/v1/connect', {
+  method: 'POST', token,
+  body: { device_id: deviceId, password: devicePassword },
+});
+if (r.status !== 200) { no(`/connect gagal: ${r.status} ${JSON.stringify(r.body)}`); process.exit(1); }
+const sessionId = r.body.data.session_id;
+ok(`sesi dibuat lewat /connect (status ${r.body.data.status})`);
+
 viewer.kirim({ type: 'SESSION_REQUEST', payload: { session_id: sessionId, device_uuid: deviceUuid } });
 
 m = await agent.terima();
@@ -135,6 +148,13 @@ m.type === 'SESSION_OFFER' && m.payload.session_id === sessionId
 agent.kirim({ type: 'SESSION_ACCEPT', payload: { session_id: sessionId } });
 m = await viewer.terima();
 m.type === 'SESSION_ACCEPTED' ? ok('viewer menerima persetujuan') : no(`gagal: ${JSON.stringify(m)}`);
+
+await tidur(400);
+r = await api('/api/v1/sessions', { token });
+let s1 = r.body?.data?.find((x) => x.session_id === sessionId);
+s1?.status === 'active'
+  ? ok('sesi berpindah ke active di database')
+  : no(`status sesi masih '${s1?.status ?? 'tidak ditemukan'}'`);
 
 const sdpAsli = 'v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\na=ice-ufrag:abcd\r\n';
 agent.kirim({ type: 'SDP_OFFER', payload: { session_id: sessionId, sdp: sdpAsli } });
@@ -179,6 +199,15 @@ bab('6. Akhiri sesi');
 viewer.kirim({ type: 'SESSION_END', payload: { session_id: sessionId } });
 m = await agent.terima();
 m.type === 'SESSION_END' ? ok('agent diberi tahu sesi berakhir') : no(`gagal: ${m.type}`);
+
+await tidur(400);
+r = await api('/api/v1/sessions', { token });
+s1 = r.body?.data?.find((x) => x.session_id === sessionId);
+if (s1 && s1.status !== 'active' && s1.status !== 'pending' && s1.ended_at) {
+  ok(`sesi tertutup di database (${s1.status}, ended_at terisi)`);
+} else {
+  no(`sesi tidak tertutup: status='${s1?.status}' ended_at='${s1?.ended_at}'`);
+}
 
 // ── Offline seketika ─────────────────────────────────────────────────────────
 bab('7. Offline seketika (temuan S-09)');
