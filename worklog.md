@@ -272,7 +272,90 @@ pemilik perangkat selamanya — pembatasan laju berubah menjadi denial of servic
 
 ---
 
-## ⚠ Blocker aktif — rute jaringan ke server putus
+**15. Blocker jaringan teratasi — akses lewat IP publik**
+
+Solusinya sederhana: SSH langsung ke `root@103.189.249.88`.
+
+Penemuan yang menjelaskan banyak hal sebelumnya: `hostname -I` menunjukkan box
+ini punya **tiga alamat sekaligus** — `192.168.99.63`, `103.189.249.83`, dan
+`103.189.249.88`. Bukan NAT, melainkan IP publik yang terikat langsung ke host.
+Itulah sebabnya `.83` dan `.88` sama-sama bekerja, dan kenapa kekhawatiran awal
+tentang `.88` yang "usang" memang tidak berdasar.
+
+Catatan sampingan: `load average` sempat terbaca 5,26 pada box 4-core, tetapi
+CPU justru 85,7% idle dengan RAM 1,8 GB bebas. Itu artefak LXC — `/proc/loadavg`
+di dalam container menampilkan beban **host Proxmox**, bukan container. Bukan
+masalah.
+
+**16. Tiga bug ditemukan uji end-to-end**
+
+| # | Bug | Sebab |
+|---|---|---|
+| 1 | Build gagal: `IpAddr` tidak dapat di-bind | `sqlx` tidak memetakan `IpAddr` ke `INET` tanpa fitur `ipnetwork`. Diperbaiki dengan cast `$2::inet` di SQL — lebih ringan daripada menambah dependensi. |
+| 2 | Test gagal kompilasi: `start_paused` tidak dikenal | Fitur `test-util` tokio tidak termasuk dalam `full`. Ditambahkan sebagai dev-dependency. |
+| 3 | **Login selalu 401 meski kredensial benar** | Lihat di bawah — ini yang paling penting. |
+
+**Bug ketiga layak dicatat khusus.** `FORCE ROW LEVEL SECURITY` berlaku pada
+pemilik tabel **termasuk di dalam fungsi `SECURITY DEFINER` yang dimiliki role
+yang sama**. `resolve_login` berjalan sebagai `aetherdesk`, tetap terkena RLS,
+dan karena tenant memang belum diketahui saat login, policy menyaring seluruh
+baris. Fungsi mengembalikan nol baris dan pemanggil menyimpulkan password salah.
+
+Pelajarannya: **`SECURITY DEFINER` bukan mekanisme bypass RLS.** Yang mem-bypass
+RLS adalah atribut `BYPASSRLS` pada role, atau status superuser.
+
+`migrations/0003_lookup_bypass_role.sql` memperbaikinya dengan role khusus
+`aetherdesk_lookup` (`NOLOGIN BYPASSRLS`) sebagai pemilik keempat fungsi.
+Sengaja **bukan** `postgres`: menjadikan superuser pemilik fungsi
+`SECURITY DEFINER` berarti setiap cacat di dalamnya berakibat kompromi total.
+
+Pemisahan role akhirnya menjadi:
+
+| Role | Login | BYPASSRLS | Peran |
+|---|---|---|---|
+| `aetherdesk` | ya | **tidak** | runtime aplikasi, tunduk pada RLS |
+| `aetherdesk_app` | tidak | tidak | disiapkan untuk pemisahan lebih lanjut |
+| `aetherdesk_lookup` | tidak | **ya** | hanya memiliki empat fungsi lookup |
+
+**17. Uji end-to-end — 26 dari 26 lulus**
+
+`scripts/e2e.sh` menjalankan alur penuh sekaligus memverifikasi properti keamanan
+yang mudah hilang saat refactor:
+
+```
+1. Kesehatan          liveness, readiness
+2. Bootstrap          organisasi pertama, slug tidak valid ditolak
+3. Login              password salah, org tidak dikenal, login berhasil
+4. Autentikasi        tanpa token, token sampah, token sah
+5. Perangkat          device ID 9 digit, password 8 karakter dari alfabet benar
+6. Quick Connect      check digit, respons seragam, lantai waktu 304 ms,
+                      kredensial benar, normalisasi huruf kecil
+7. Pembatasan laju    5 kegagalan menjeda, kredensial benar pun ditolak,
+                      jeda tidak merembet ke perangkat lain
+```
+
+Pembatasan laju diverifikasi secara perilaku, bukan sekadar "request terkirim":
+setelah lima password salah, **password yang benar pun ditolak**, dan `throttled`
+tercatat di `quick_connect_attempts`.
+
+Satu subtlety yang ditemukan dan diterima: lantai waktu respons hanya berlaku
+pada badan handler, bukan pada penolakan di ekstraktor autentikasi. Ini tidak
+merugikan — request tanpa token tidak pernah menyentuh data perangkat, jadi tidak
+ada yang bisa dibocorkan lewat selisih waktunya.
+
+**18. Header JWT terverifikasi**
+
+```json
+{"typ":"JWT","alg":"EdDSA"}
+```
+
+ADR-008 terpenuhi di tingkat wire, bukan hanya di dokumen.
+
+---
+
+## ~~Blocker~~ — rute jaringan ke server putus (SELESAI)
+
+> Teratasi pada butir 15. Dipertahankan sebagai catatan diagnosis.
 
 Terjadi di tengah pengerjaan, setelah commit `7693636` berhasil di-deploy.
 

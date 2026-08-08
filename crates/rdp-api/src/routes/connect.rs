@@ -185,9 +185,12 @@ async fn catat(
     // pemanggil mengirim string panjang.
     let dipotong: String = device_id_input.chars().take(9).collect();
 
-    let hasil = sqlx::query("SELECT log_quick_connect_attempt($1, $2, $3, $4)")
+    // IP dikirim sebagai teks lalu di-cast ke `inet` di sisi SQL. sqlx tidak
+    // memetakan `IpAddr` ke `INET` tanpa fitur `ipnetwork`, dan menambah
+    // dependensi hanya untuk satu bind tidak sepadan.
+    let hasil = sqlx::query("SELECT log_quick_connect_attempt($1, $2::inet, $3, $4)")
         .bind(&dipotong)
-        .bind(ip)
+        .bind(ip.to_string())
         .bind(outcome.as_db_str())
         .bind(claims.user_id())
         .execute(&state.db)
