@@ -476,6 +476,60 @@ akan gagal bagi jaringan di belakang Symmetric NAT (secara industri 10-20%
 kasus). Viewer menampilkan pesan yang menjelaskan hal ini alih-alih sekadar
 "gagal". Lihat DEPLOYMENT_PLAN.md §7 untuk keputusan TURN yang tertunda.
 
+**26. Empat bug ditemukan dari pengujian Anda**
+
+Urutannya menarik: setiap perbaikan membuka lapisan berikutnya.
+
+| # | Gejala | Sebab sebenarnya |
+|---|---|---|
+| 1 | Koneksi `failed` meski signaling bersih | Kandidat ICE dari agent tiba sebelum viewer membuat peer connection, lalu dibuang. Bug trickle-ICE klasik. |
+| 2 | Tombol Masuk mati total | `expires 7d` pada `app.js`. Browser menahan versi lama sementara HTML sudah baru; impor gagal dan seluruh skrip berhenti. |
+| 3 | "tidak terautentikasi" padahal kredensial benar | `/auth/refresh` yang dijanjikan ARCHITECTURE.md §6.2 tidak pernah diimplementasikan. Sesi mati tiap 15 menit tanpa jalan kembali ke form masuk. |
+| 4 | P2P gagal lintas jaringan | Ini yang **asli** — memang butuh TURN. |
+
+Gejala 1 sempat menampilkan pesan "Symmetric NAT", padahal itu tebakan default
+yang kebetulan salah sasaran. Diagnosanya kini berbasis bukti: nol kandidat
+berarti WebRTC diblokir, hanya `host` berarti STUN tidak terjangkau, dan
+Symmetric NAT baru disebut bila `srflx` ada tetapi `relay` tidak.
+
+**27. TURN terpasang — coturn di server sendiri**
+
+Temuan yang menyederhanakan rencana: `ip addr` menunjukkan `103.189.249.83/32`
+dan `103.189.249.88/32` **terikat langsung ke `eth0`**, bukan hasil NAT.
+DEPLOYMENT_PLAN.md §7 sebelumnya menyatakan perlu port forwarding di router —
+itu keliru dan sudah dikoreksi. Cukup membuka ufw.
+
+| Aspek | Nilai |
+|---|---|
+| Alamat | `103.189.249.88:3478` UDP dan TCP |
+| Rentang relay | `49160-49260` UDP |
+| Autentikasi | HMAC berumur pendek, TTL 6 jam |
+| Endpoint | `GET /api/v1/turn-credentials`, wajib terautentikasi |
+
+**Pengerasan adalah bagian terpentingnya.** Server berada di `192.168.99.0/24`
+bersama host Proxmox dan mesin lain. TURN tanpa pembatasan dapat dipakai siapa
+pun yang memperoleh kredensial untuk meneruskan paket ke seluruh LAN itu —
+berubah menjadi pintu masuk jaringan. Konfigurasi memuat **13 aturan
+`denied-peer-ip`** yang menutup rentang privat, loopback, link-local, CGNAT,
+multicast, beserta padanan IPv6-nya, ditambah `no-multicast-peers` dan kuota.
+
+Verifikasi:
+
+| Uji | Hasil |
+|---|---|
+| Alokasi relay dengan kredensial HMAC | berhasil, 0 paket hilang |
+| STUN Binding dari internet | balas **6 ms**, Binding Success |
+| TCP 3478 dari internet | terbuka |
+| 96 unit test | seluruhnya lulus |
+
+Konsekuensi yang diterima dan dicatat: IP origin kini diketahui publik. Yang
+tersisa sebagai perlindungan adalah ufw yang menolak 80/443 dari luar rentang
+Cloudflare, sehingga mengetahui IP tidak memberi akses ke layanan web. Sisa
+risiko nyata: DDoS volumetrik langsung ke IP.
+
+`infra/turn/turnserver.conf` dan `infra/nginx/aetherdesk.conf` disalin ke repo
+supaya konfigurasi yang berjalan terlacak, bukan hanya hidup di mesin itu.
+
 ---
 
 ## ~~Blocker~~ — rute jaringan ke server putus (SELESAI)

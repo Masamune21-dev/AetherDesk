@@ -55,10 +55,18 @@ async fn main() -> Result<()> {
     .context("gagal memuat keypair JWT")?;
     tracing::info!(issuer = %cfg.jwt_issuer, "keypair JWT Ed25519 dimuat");
 
+    match &cfg.turn {
+        Some(t) => tracing::info!(host = %t.host, port = t.port, "TURN dikonfigurasi"),
+        None => tracing::warn!(
+            "TURN tidak dikonfigurasi — koneksi lintas-NAT ketat akan gagal"
+        ),
+    }
+
     let app_state = AppState {
         db,
         redis,
         jwt,
+        turn: cfg.turn.clone(),
         events: Arc::new(rdp_core::InProcessBus),
     };
 
@@ -87,7 +95,8 @@ async fn main() -> Result<()> {
             "/devices/{device_uuid}/rotate-password",
             post(routes::devices::rotasi_password),
         )
-        .route("/connect", post(routes::connect::connect));
+        .route("/connect", post(routes::connect::connect))
+        .route("/turn-credentials", get(routes::turn::kredensial));
 
     let app = Router::new()
         .nest("/api", operasional)

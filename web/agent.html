@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk — Agent</title>
-<link rel="stylesheet" href="/style.css?v=3">
+<link rel="stylesheet" href="/style.css?v=4">
 </head>
 <body>
 <div class="wrap">
@@ -97,7 +97,7 @@
 <script type="module">
 import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
          Signal, Kanal, jelaskanKegagalan, $, tampilkan, status, kelompokkan }
-  from '/app.js?v=3';
+  from '/app.js?v=4';
 
 let device = null;      // { device_uuid, device_id, session_password }
 let signal = null;
@@ -245,7 +245,7 @@ $('#btnIzinkan').onclick = async () => {
   // Agent adalah pihak yang menawarkan SDP. Ini menyelesaikan kontradiksi
   // T-10: ARCHITECTURE.md §7.1 dan API.md §9 menempatkan agent sebagai
   // offerer, sementara §8.1 menempatkan viewer. Yang dipakai: agent.
-  const kanal = new Kanal({
+  const kanal = await Kanal.buat({
     onKandidat: (c) => signal.kirim('ICE_CANDIDATE', { session_id: sid, candidate: c }),
     onStatus: (s, d) => {
       if (s === 'failed') {

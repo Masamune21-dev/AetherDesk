@@ -21,6 +21,16 @@ pub struct Config {
     pub jwt_private_key_path: String,
     pub jwt_public_key_path: String,
     pub jwt_issuer: String,
+    /// Kosong bila TURN belum dikonfigurasi; klien lalu memakai STUN saja.
+    pub turn: Option<TurnConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnConfig {
+    pub secret: String,
+    pub host: String,
+    pub port: u16,
+    pub realm: String,
 }
 
 impl Config {
@@ -36,8 +46,30 @@ impl Config {
             jwt_private_key_path: required("AETHERDESK_JWT_PRIVATE_KEY_PATH")?,
             jwt_public_key_path: required("AETHERDESK_JWT_PUBLIC_KEY_PATH")?,
             jwt_issuer: optional("AETHERDESK_JWT_ISSUER", "aetherdesk"),
+            turn: turn_dari_env()?,
         })
     }
+}
+
+/// TURN bersifat opsional: instalasi tanpa relay tetap berjalan, hanya saja
+/// koneksi lintas-NAT ketat akan gagal. Seluruh nilai harus ada bersama-sama —
+/// konfigurasi separuh jadi lebih berbahaya daripada tidak ada sama sekali,
+/// karena klien mengira relay tersedia padahal tidak.
+fn turn_dari_env() -> Result<Option<TurnConfig>> {
+    let Ok(secret) = std::env::var("AETHERDESK_TURN_SECRET") else {
+        return Ok(None);
+    };
+    if secret.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(TurnConfig {
+        secret,
+        host: required("AETHERDESK_TURN_HOST")?,
+        port: optional("AETHERDESK_TURN_PORT", "3478")
+            .parse()
+            .context("AETHERDESK_TURN_PORT harus berupa angka")?,
+        realm: optional("AETHERDESK_TURN_REALM", "aetherdesk"),
+    }))
 }
 
 fn required(key: &str) -> Result<String> {

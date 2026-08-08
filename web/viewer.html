@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk — Viewer</title>
-<link rel="stylesheet" href="/style.css?v=3">
+<link rel="stylesheet" href="/style.css?v=4">
 </head>
 <body>
 <div class="wrap lebar">
@@ -75,7 +75,7 @@
 <script type="module">
 import { api, simpanToken, hapusToken, adaSesi, aksesSegar, saatSesiHabis,
          Signal, Kanal, jelaskanKegagalan, $, tampilkan, status, statistik }
-  from '/app.js?v=3';
+  from '/app.js?v=4';
 
 let signal = null;
 let kanal = null;
@@ -135,7 +135,7 @@ $('#btnHubungkan').onclick = async () => {
   // kandidat ICE segera setelah setLocalDescription — jauh sebelum offer-nya
   // sampai ke sini. Tanpa kanal yang sudah siap, kandidat-kandidat awal itu
   // tidak punya tempat mendarat dan hilang tanpa jejak.
-  kanal = new Kanal({
+  kanal = await Kanal.buat({
     onKandidat: (c) => signal.kirim('ICE_CANDIDATE', { session_id: sessionId, candidate: c }),
     onStatus: (s, d) => {
       $('#hKoneksi').textContent = s;

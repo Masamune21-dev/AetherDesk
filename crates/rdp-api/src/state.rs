@@ -1,6 +1,6 @@
 //! State bersama yang dibagi ke seluruh handler.
 
-use crate::auth::jwt::JwtKeys;
+use crate::{auth::jwt::JwtKeys, config::TurnConfig};
 use rdp_core::InProcessBus;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -10,6 +10,7 @@ pub struct AppState {
     pub db: PgPool,
     pub redis: redis::aio::ConnectionManager,
     pub jwt: JwtKeys,
+    pub turn: Option<TurnConfig>,
     /// ADR-013: bus in-process untuk Fase 0. Mengganti ke NATS berarti
     /// mengganti tipe ini menjadi `Arc<dyn EventBus>` — pemanggil tidak berubah.
     pub events: Arc<InProcessBus>,

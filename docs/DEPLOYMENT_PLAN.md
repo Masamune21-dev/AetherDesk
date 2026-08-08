@@ -171,23 +171,74 @@ Urutannya: isi sertifikat → `nginx -t` → baru symlink → `reload`.
 
 ---
 
-## 7. TURN / Relay — kenapa ditunda
+## 7. TURN / Relay — terpasang
 
-Fase 0 memakai STUN publik saja. Konsekuensinya: koneksi P2P gagal bagi pengguna
-di belakang Symmetric NAT (secara industri sekitar 10-20% kasus).
+> **Koreksi.** Versi awal dokumen ini menyatakan TURN memerlukan port forwarding
+> di router. Itu keliru: `ip addr` menunjukkan `103.189.249.83/32` dan
+> `103.189.249.88/32` **terikat langsung ke `eth0`**, bukan hasil NAT. Yang
+> dibutuhkan hanya membuka ufw.
 
-Memasang TURN sendiri di server ini menghadapi dua kendala yang perlu keputusan Anda:
+| Aspek | Nilai |
+|---|---|
+| Perangkat lunak | coturn (paket Ubuntu) |
+| Alamat | `103.189.249.88` |
+| Port kontrol | `3478` UDP dan TCP |
+| Rentang relay | `49160-49260` UDP |
+| Autentikasi | HMAC berumur pendek, TTL 6 jam |
+| Realm | `aetherdesk.masamune.my.id` |
 
-1. **Port forwarding.** TURN butuh UDP `3478` plus rentang media `49152-65535`
-   diteruskan dari router ke `192.168.99.63`. Ini konfigurasi di router, bukan di server.
-2. **Cloudflare tidak mem-proxy UDP.** TURN harus diakses langsung ke IP origin,
-   misalnya lewat subdomain `turn.masamune.my.id` dengan awan abu-abu — yang berarti
-   **IP origin Anda menjadi publik**, dan itu menghapus sebagian perlindungan
-   Cloudflare untuk seluruh server, termasuk dua situs produksi.
+### 7.1 Kredensial tidak pernah statis
 
-Alternatif yang lebih aman: sewa TURN terkelola (Cloudflare Calls, Twilio NTS,
-Metered) atau tempatkan coturn di VPS terpisah yang memang IP-nya boleh publik.
-Keputusan ini diambil sebelum Fase 1.
+Rahasia bersama hanya ada di server. Klien memanggil
+`GET /api/v1/turn-credentials` (wajib terautentikasi) dan menerima pasangan
+`username`/`credential` yang kedaluwarsa dalam enam jam:
+
+```
+username   = <unix_timestamp_kedaluwarsa>:<user_id>
+credential = base64(HMAC-SHA1(username, rahasia_bersama))
+```
+
+Skema REST API coturn. Konsekuensinya, tangkapan konsol atau berkas HAR yang
+tersebar tidak berubah menjadi relay gratis bagi orang lain.
+
+Catatan: HMAC-SHA1 di sini ditetapkan protokol TURN (RFC 5389 §15.4), bukan
+pilihan kami. Perannya sebagai kode autentikasi pesan — kelemahan tumbukan
+SHA-1 tidak berlaku pada penggunaan ini.
+
+### 7.2 Pengerasan — bagian yang paling mudah terlewat
+
+Server ini berada di `192.168.99.0/24` bersama host Proxmox dan mesin lain.
+**TURN yang tidak dibatasi dapat dipakai siapa pun yang memperoleh kredensial
+untuk meneruskan paket ke alamat mana pun yang dapat dijangkau server** —
+termasuk seluruh LAN itu. TURN terbuka berubah menjadi pintu masuk jaringan.
+
+Karena itu konfigurasi memuat 13 aturan `denied-peer-ip` yang menutup seluruh
+rentang privat, loopback, link-local, CGNAT, multicast, serta padanan IPv6-nya.
+Ditambah `no-multicast-peers` dan kuota pemakaian.
+
+Berkas konfigurasi lengkap ada di `infra/turn/turnserver.conf` (rahasia
+disamarkan).
+
+### 7.3 Konsekuensi yang diterima
+
+IP origin `103.189.249.88` kini diketahui publik, dan itu berlaku untuk seluruh
+situs di mesin ini. Yang tersisa sebagai perlindungan:
+
+- ufw menolak `80/443` dari alamat mana pun di luar rentang Cloudflare,
+  sehingga mengetahui IP tidak memberi akses ke layanan web
+- SSH dibatasi ke subnet tertentu, dijaga fail2ban
+- Sisa risiko yang nyata: DDoS volumetrik langsung ke IP, melewati Cloudflare
+
+Bila risiko itu kelak dianggap terlalu besar, jalan keluarnya memindahkan coturn
+ke VPS terpisah atau beralih ke TURN terkelola — keduanya tidak mengubah kode,
+hanya isi `GET /api/v1/turn-credentials`.
+
+### 7.4 Yang belum dikerjakan
+
+`turns://` pada port 443 memerlukan sertifikat dari CA publik. Cloudflare Origin
+Certificate tidak dapat dipakai karena browser tidak mempercayainya. Ini berguna
+untuk menembus jaringan korporat yang hanya mengizinkan 443, dan menunggu
+Let's Encrypt dipasang.
 
 ---
 

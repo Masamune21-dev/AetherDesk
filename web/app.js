@@ -184,19 +184,38 @@ export class Signal extends EventTarget {
 
 // ── WebRTC ───────────────────────────────────────────────────────────────────
 
-/**
- * Fase 0 memakai STUN publik saja. Konsekuensinya dicatat terbuka di
- * DEPLOYMENT_PLAN.md §7: koneksi gagal bagi pengguna di belakang Symmetric NAT,
- * secara industri sekitar 10-20% kasus. TURN menunggu keputusan soal port
- * forwarding UDP dan paparan IP origin.
- */
-export const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
+/** Cadangan bila API tidak dapat dihubungi. STUN saja — cukup untuk jaringan
+ *  yang ramah, tidak cukup untuk Symmetric NAT. */
+const ICE_CADANGAN = [{ urls: 'stun:stun.l.google.com:19302' }];
 
-export function buatPeer() {
-  return new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' });
+let iceCache = null;
+
+/**
+ * Mengambil daftar ICE server beserta kredensial TURN berumur pendek.
+ *
+ * Kredensial sengaja tidak ditanam di klien: yang dikirim server hanyalah
+ * pasangan HMAC yang kedaluwarsa dalam hitungan jam, sehingga bocornya konsol
+ * atau HAR tidak berubah menjadi relay gratis bagi orang lain.
+ */
+export async function ambilIceServers() {
+  if (iceCache && iceCache.expires_at * 1000 > Date.now() + 60_000) {
+    return iceCache.ice_servers;
+  }
+  try {
+    const d = await api('/v1/turn-credentials');
+    iceCache = d;
+    const punyaTurn = d.ice_servers.some((s) =>
+      (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => u.startsWith('turn:')));
+    if (!punyaTurn) console.warn('TURN tidak tersedia — hanya STUN');
+    return d.ice_servers;
+  } catch (e) {
+    console.warn('gagal mengambil kredensial ICE, memakai cadangan', e.message);
+    return ICE_CADANGAN;
+  }
+}
+
+export function buatPeer(iceServers = ICE_CADANGAN) {
+  return new RTCPeerConnection({ iceServers, bundlePolicy: 'max-bundle' });
 }
 
 /**
@@ -212,8 +231,14 @@ export function buatPeer() {
  * seluruh antrean sekaligus.
  */
 export class Kanal {
-  constructor({ onKandidat, onStatus }) {
-    this.pc = buatPeer();
+  /** Gunakan `await Kanal.buat({...})` supaya kredensial TURN sempat diambil. */
+  static async buat(opsi) {
+    const iceServers = await ambilIceServers();
+    return new Kanal({ ...opsi, iceServers });
+  }
+
+  constructor({ onKandidat, onStatus, iceServers }) {
+    this.pc = buatPeer(iceServers);
     this.remoteSiap = false;
     this.antre = [];
     this.kandidatLokal = [];
