@@ -69,11 +69,63 @@ terlihat di dashboard Cloudflare.
 **Tindakan:** saat membuat A record `aetherdesk.masamune.my.id`, **salin IP origin
 dari record `vid.masamune.my.id` yang sudah jalan**, jangan pakai `.88` dari ingatan.
 
-### Menunggu keputusan
+### Keputusan yang diambil
 
-1. Fokus Fase 0 — apa yang dibangun lebih dulu
-2. Stack web dashboard — Laravel (sesuai dokumen) atau Vue SPA langsung ke API Rust
-3. Metode auth untuk push ke GitHub
+| # | Pertanyaan | Keputusan |
+|---|---|---|
+| 1 | Fokus Fase 0 | **Control plane + viewer browser.** API Rust + signaling + dashboard + agent/viewer berbasis browser. Agent native menyusul saat ada mesin build Windows/macOS. |
+| 2 | Stack dashboard | **Vue 3 SPA langsung ke API Rust.** Laravel dihapus dari arsitektur — dicatat sebagai ADR-007. |
+| 3 | Auth GitHub | **Deploy key** memakai SSH key yang sudah ada di mesin lokal. |
+
+**4. Perbaikan dokumen — 6 dari 8 Blocker ditutup** (commit `0e3ffb2`)
+
+| Temuan | Penyelesaian |
+|---|---|
+| B-01, T-11 | ADR-008 — SDP ditandatangani device key Ed25519, SAS untuk sesi attended, JWT pindah ke EdDSA |
+| B-02 | ADR-009 — recording dienkripsi di klien, kunci dibungkus kunci publik escrow organisasi |
+| B-03 | ADR-010 — agent Windows dipecah jadi service LocalSystem + session agent via `WTSQueryUserToken` |
+| B-04 | ADR-011 — macOS pakai hardened runtime + profil PPPC via MDM, bukan App Sandbox |
+| B-05 | PRD §6.1 — latency didefinisikan ulang sebagai *added latency*, ditambah baris glass-to-glass |
+| B-06 | `QUICK_CONNECT.md` baru — device ID 9 digit + check digit Damm, password sekali pakai 2⁴⁰, rate limit per-ID, mitigasi penipuan |
+| B-07 | ADR-012 — viewer merender ke native surface `wgpu` di bawah webview, bukan ke canvas |
+| B-08 | SYNC.md §2.1 — prasyarat pendaftaran SafeBoot registry + watchdog pemulihan 15 menit |
+
+Ikut tertutup: S-02 (ADR-007), R-01 dan R-04 (README dengan indeks 25 dokumen).
+Ditambahkan: ADR-013 (Fase 0 tanpa NATS/K8s, trait `EventBus` sejak commit pertama),
+`.gitignore` yang memblokir `*.env`, `*.key`, `*.pem`.
+
+**5. Persiapan server** — langkah 1 dan 4 dari DEPLOYMENT_PLAN.md §9
+
+```
+user sistem   aetherdesk (nologin, home /home/aetherdesk)
+direktori     /var/www/aetherdesk.masamune.my.id/{repo,bin,dashboard,env,log}
+              env/ mode 0700, sisanya 0755, pemilik aetherdesk
+SSL kosong    /etc/ssl/cloudflare/aetherdesk.masamune.my.id.pem  (0644 root)
+              /etc/ssl/cloudflare/aetherdesk.masamune.my.id.key  (0600 root)
+```
+
+Belum ada satu pun perubahan pada nginx. Dua situs produksi tidak tersentuh.
+
+### Menunggu Anda
+
+| # | Tindakan | Kenapa memblokir |
+|---|---|---|
+| 1 | Tambahkan deploy key ke repo GitHub (Settings → Deploy keys, centang *Allow write access*) | Tanpa ini push tidak bisa dilakukan |
+| 2 | Tempel Cloudflare Origin Certificate ke dua file SSL yang sudah disiapkan | nginx menolak `ssl_certificate` kosong; mengaktifkan vhost sebelum ini terisi akan menjatuhkan dua situs produksi |
+| 3 | Buat A record `aetherdesk` di Cloudflare — **salin IP origin dari record `vid`**, jangan pakai `.88` | Lihat temuan IP di bawah |
+
+Kunci untuk langkah 1:
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINg0C3lMaddFcO44fuYHE8i0aheYGNcaheI3eecnPPvV masamunekazuto21@gmail.com
+```
+
+### Berikutnya dari saya
+
+1. Pasang PostgreSQL 16, Redis 7, dan Rust toolchain di server
+2. Scaffold workspace Rust: `rdp-core`, `rdp-api`, `rdp-signal`
+3. Skema database awal dengan perbaikan T-05 s/d T-08 sudah diterapkan sejak migrasi pertama
+4. Lanjutkan perbaikan 21 Tinggi + 14 Sedang + sisa Rendah
 
 ### Catatan operasional
 
