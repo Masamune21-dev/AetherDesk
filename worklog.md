@@ -351,6 +351,81 @@ ada yang bisa dibocorkan lewat selisih waktunya.
 
 ADR-008 terpenuhi di tingkat wire, bukan hanya di dokumen.
 
+**19. `rdp-signal` — Signal Server berjalan**
+
+Crate ketiga. Meneruskan SDP dan kandidat ICE antara viewer dan agent, serta
+memelihara kehadiran perangkat.
+
+| Modul | Isi |
+|---|---|
+| `protocol.rs` | Enum pesan masuk/keluar sesuai amplop API.md §9 |
+| `registry.rs` | Registri koneksi in-memory + peta sesi (ADR-013) |
+| `presence.rs` | Kehadiran perangkat — **menutup temuan S-09** |
+| `auth.rs` | Verifikasi JWT saja, tanpa kemampuan menerbitkan |
+| `main.rs` | Handler WebSocket, ping 25 detik, routing pesan |
+
+Tiga keputusan yang layak dicatat:
+
+**Server tidak pernah membaca isi SDP.** Ia hanya merutekan byte apa adanya.
+Begitu server ikut menormalkan atau memformat ulang SDP, tanda tangan device key
+yang diwajibkan ADR-008 langsung batal. Ada test khusus yang menjaga properti ini.
+
+**Setiap pesan bersesi diperiksa keanggotaannya.** Tanpa itu, siapa pun yang
+terautentikasi dapat menyuntikkan SDP atau kandidat ICE ke sesi orang lain hanya
+dengan menebak `session_id` — pembajakan sesi tanpa perlu menembus kripto apa pun.
+
+**Verifikasi JWT saja, tanpa kunci privat.** Inilah nilai praktis ADR-008 yang
+terasa langsung: dengan HMAC, Signal Server mau tidak mau ikut memegang kemampuan
+menerbitkan token. Dengan Ed25519, cukup kunci publik yang dipasang di sini.
+
+**20. S-09 ditutup — offline seketika**
+
+ARCHITECTURE.md §8.4 mengandalkan TTL Redis 90 detik, sehingga mesin yang mati
+mendadak tetap tampil online sampai satu setengah menit. Itu bertabrakan dengan
+FR-DEV-06 yang menjanjikan status real-time.
+
+Sekarang transisi offline terjadi langsung saat WebSocket putus. TTL tetap ada
+tetapi turun perannya menjadi jaring pengaman untuk kasus tanpa event putus —
+proses dibunuh paksa, node signal mati, atau jaringan hilang tanpa FIN.
+
+Terverifikasi: **offline dalam < 1 detik.**
+
+**21. Bug ditemukan uji signaling**
+
+Pesan `ERROR` untuk token palsu tidak pernah sampai ke klien. Penyebabnya
+`penulis.abort()` membunuh task penulis **sebelum** pesan sempat mengalir ke
+socket. Klien hanya melihat koneksi tertutup tanpa alasan.
+
+Diperbaiki dengan `tutup_setelah_terkuras()`: seluruh pengirim dilepas sehingga
+channel tertutup, task penulis menguras antrean lalu berhenti sendiri, dengan
+batas waktu 2 detik agar klien yang berhenti membaca tidak menahannya selamanya.
+
+**22. Uji signaling — 16/16 lulus, termasuk lewat Cloudflare**
+
+```
+1. Persiapan          bootstrap, token, daftar perangkat
+2. Autentikasi WS     token palsu ditolak, agent, viewer
+3. Presence           online saat agent terhubung
+4. Alur sesi          tawaran, persetujuan, SDP byte-per-byte,
+                      SDP answer, kandidat ICE utuh
+5. Isolasi sesi       pihak luar ditolak menyuntik SDP maupun
+                      mengakhiri sesi orang lain
+6. Akhiri sesi        agent diberi tahu
+7. Offline seketika   < 1 detik, bukan TTL 90 detik
+```
+
+Dijalankan dua kali: lokal (`ws://127.0.0.1:8081`) dan lewat internet
+(`wss://aetherdesk.masamune.my.id/ws`). Keduanya 16/16.
+
+Total pengujian: **84 unit test + 26 uji API + 16 uji signaling.**
+
+**23. Halaman status diperbaiki**
+
+Probe `rdp-signal` sebelumnya memakai `fetch` ke `/ws`, yang selalu menghasilkan
+400 karena bukan permintaan upgrade — dan itu bukan indikasi layanannya mati.
+Sekarang memakai WebSocket sungguhan, plus menampilkan latensi PostgreSQL dan
+Redis dari `/api/health/ready`.
+
 ---
 
 ## ~~Blocker~~ — rute jaringan ke server putus (SELESAI)
