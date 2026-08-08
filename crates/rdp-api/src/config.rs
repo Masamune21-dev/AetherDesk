@@ -15,6 +15,12 @@ pub struct Config {
     pub bind: String,
     pub db_max_connections: u32,
     pub db_acquire_timeout: Duration,
+    /// Keypair Ed25519 untuk JWT (ADR-008). Disimpan sebagai berkas, bukan
+    /// nilai environment: PEM bersifat multi-baris dan `EnvironmentFile`
+    /// systemd tidak menanganinya dengan baik.
+    pub jwt_private_key_path: String,
+    pub jwt_public_key_path: String,
+    pub jwt_issuer: String,
 }
 
 impl Config {
@@ -27,6 +33,9 @@ impl Config {
                 .parse()
                 .context("AETHERDESK_DB_MAX_CONN harus berupa angka")?,
             db_acquire_timeout: Duration::from_secs(5),
+            jwt_private_key_path: required("AETHERDESK_JWT_PRIVATE_KEY_PATH")?,
+            jwt_public_key_path: required("AETHERDESK_JWT_PUBLIC_KEY_PATH")?,
+            jwt_issuer: optional("AETHERDESK_JWT_ISSUER", "aetherdesk"),
         })
     }
 }

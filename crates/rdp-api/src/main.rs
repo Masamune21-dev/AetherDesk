@@ -3,12 +3,22 @@
 //! Fase 0: konfigurasi, kolam koneksi, endpoint kesehatan, dan shutdown yang
 //! rapi. Modul domain (auth, devices, sessions) menyusul di atas fondasi ini.
 
+mod auth;
 mod config;
+mod db;
+mod error;
 mod health;
+mod net;
+mod ratelimit;
+mod routes;
 mod state;
 
 use anyhow::{Context, Result};
-use axum::{routing::get, Router};
+use auth::jwt::JwtKeys;
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use config::Config;
 use sqlx::postgres::PgPoolOptions;
 use state::AppState;
@@ -37,9 +47,18 @@ async fn main() -> Result<()> {
         .context("gagal terhubung ke Redis")?;
     tracing::info!("redis terhubung");
 
+    let jwt = JwtKeys::from_pem_files(
+        &cfg.jwt_private_key_path,
+        &cfg.jwt_public_key_path,
+        &cfg.jwt_issuer,
+    )
+    .context("gagal memuat keypair JWT")?;
+    tracing::info!(issuer = %cfg.jwt_issuer, "keypair JWT Ed25519 dimuat");
+
     let app_state = AppState {
         db,
         redis,
+        jwt,
         events: Arc::new(rdp_core::InProcessBus),
     };
 
@@ -54,7 +73,19 @@ async fn main() -> Result<()> {
         .route("/health", get(health::liveness))
         .route("/health/ready", get(health::readiness));
 
-    let v1 = Router::new();
+    let v1 = Router::new()
+        .route("/auth/bootstrap", post(routes::auth::bootstrap))
+        .route("/auth/login", post(routes::auth::login))
+        .route("/auth/me", get(routes::auth::me))
+        .route(
+            "/devices",
+            post(routes::devices::daftar).get(routes::devices::daftar_semua),
+        )
+        .route(
+            "/devices/{device_uuid}/rotate-password",
+            post(routes::devices::rotasi_password),
+        )
+        .route("/connect", post(routes::connect::connect));
 
     let app = Router::new()
         .nest("/api", operasional)
