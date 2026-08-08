@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Dashboard — AetherDesk</title>
+<link rel="stylesheet" href="/style.css?v=10">
+<style>
+  .tab-bar { display: flex; gap: var(--s1); border-bottom: 1px solid var(--line); }
+  .tab-bar button {
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    border-radius: 0; color: var(--ink-3); min-height: 2.5rem;
+    padding: 0 var(--s4); text-transform: uppercase;
+  }
+  .tab-bar button:hover:not(:disabled) { color: var(--ink); filter: none; }
+  .tab-bar button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--signal-b); }
+
+  .scroller { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+  th, td { text-align: left; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: var(--t-2xs); font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3);
+    white-space: nowrap;
+  }
+  td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td.prosa { font-family: var(--sans); color: var(--ink-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--surface-2); }
+  .kosong { padding: var(--s10) var(--s4); text-align: center; color: var(--ink-3); }
+  .angka { display: flex; gap: var(--s8); flex-wrap: wrap; }
+  .angka div { display: flex; flex-direction: column; gap: var(--s1); }
+  .angka .n { font-family: var(--mono); font-size: var(--t-2xl); line-height: 1; font-variant-numeric: tabular-nums; }
+  .angka .l { font-family: var(--mono); font-size: var(--t-2xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+</style>
+</head>
+<body>
+<div class="wrap lebar">
+  <div class="judul-halaman">
+    <span class="eyebrow">Dashboard</span>
+    <h1>Perangkat, sesi, dan jejak audit</h1>
+  </div>
+
+  <section class="card sempit" id="kartuMasuk">
+    <h2>Masuk</h2>
+    <div class="field">
+      <label for="slug">Organisasi</label>
+      <input id="slug" class="mono" placeholder="nama-organisasi" autocomplete="organization">
+    </div>
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="sandi">Kata sandi</label>
+      <input id="sandi" type="password" autocomplete="current-password">
+    </div>
+    <div class="baris"><button id="btnMasuk">Masuk</button></div>
+    <p class="status" id="statusMasuk"></p>
+  </section>
+
+  <section class="card" id="kartuData" hidden>
+    <div class="card-head">
+      <h2 id="namaOrg">—</h2>
+      <button class="sekunder kecil-btn" id="btnSegarkan">Segarkan</button>
+    </div>
+
+    <div class="angka">
+      <div><span class="n" id="nPerangkat">—</span><span class="l">Perangkat</span></div>
+      <div><span class="n ok" id="nOnline" style="color:var(--ok)">—</span><span class="l">Online</span></div>
+      <div><span class="n" id="nSesi">—</span><span class="l">Sesi</span></div>
+      <div><span class="n" id="nAudit">—</span><span class="l">Entri audit</span></div>
+    </div>
+
+    <div class="tab-bar" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="perangkat">Perangkat</button>
+      <button role="tab" aria-selected="false" data-tab="sesi">Sesi</button>
+      <button role="tab" aria-selected="false" data-tab="audit">Audit</button>
+    </div>
+
+    <div class="scroller">
+      <div id="panel-perangkat"></div>
+      <div id="panel-sesi" hidden></div>
+      <div id="panel-audit" hidden></div>
+    </div>
+    <p class="status" id="statusData"></p>
+  </section>
+
+  <footer>aetherdesk.masamune.my.id</footer>
+</div>
+
+<script type="module">
+import { api, simpanToken, hapusToken, adaSesi, saatSesiHabis,
+         pasangHeader, $, status } from '/app.js?v=10';
+
+pasangHeader('/dashboard');
+
+const tampil = (el, ya = true) => { el.hidden = !ya; };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const waktu = (iso) => iso
+  ? new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'medium' })
+  : '—';
+
+const durasi = (d) => d == null ? '—'
+  : d < 60 ? `${d}s`
+  : d < 3600 ? `${Math.floor(d / 60)}m ${d % 60}s`
+  : `${Math.floor(d / 3600)}j ${Math.floor((d % 3600) / 60)}m`;
+
+const lencana = (kelas, teks) => `<span class="badge ${kelas}">${esc(teks)}</span>`;
+
+function tabel(kolom, baris, pesanKosong) {
+  if (!baris.length) return `<div class="kosong">${esc(pesanKosong)}</div>`;
+  return `<table><thead><tr>${kolom.map((k) => `<th>${esc(k)}</th>`).join('')}</tr></thead>`
+       + `<tbody>${baris.join('')}</tbody></table>`;
+}
+
+// ── Masuk ────────────────────────────────────────────────────────────────────
+$('#btnMasuk').onclick = async () => {
+  const el = $('#statusMasuk');
+  status(el, 'menghubungi server…', 'wait');
+  try {
+    const r = await api('/v1/auth/login', {
+      method: 'POST',
+      body: {
+        org_slug: $('#slug').value.trim(),
+        email: $('#email').value.trim(),
+        password: $('#sandi').value,
+      },
+    });
+    simpanToken(r.access_token, r.refresh_token);
+    tampil($('#kartuMasuk'), false);
+    tampil($('#kartuData'), true);
+    await muat();
+  } catch (e) { status(el, e.message, 'bad'); }
+};
+
+// ── Muat data ────────────────────────────────────────────────────────────────
+async function muat() {
+  const el = $('#statusData');
+  status(el, 'memuat…', 'wait');
+  try {
+    const [me, perangkat, sesi, audit] = await Promise.all([
+      api('/v1/auth/me'),
+      api('/v1/devices'),
+      api('/v1/sessions'),
+      api('/v1/audit-logs'),
+    ]);
+
+    $('#namaOrg').textContent = me.org_name;
+    $('#nPerangkat').textContent = perangkat.length;
+    $('#nOnline').textContent = perangkat.filter((d) => d.status === 'online').length;
+    $('#nSesi').textContent = sesi.length;
+    $('#nAudit').textContent = audit.length;
+
+    $('#panel-perangkat').innerHTML = tabel(
+      ['Device ID', 'Alias', 'OS', 'Status', 'Heartbeat terakhir'],
+      perangkat.map((d) => `<tr>
+        <td>${esc(d.device_id_tampil)}</td>
+        <td class="prosa">${esc(d.alias || '—')}</td>
+        <td>${esc(d.os_type)}</td>
+        <td>${lencana(d.status === 'online' ? 'ok' : 'netral', d.status)}</td>
+        <td>${esc(waktu(d.last_heartbeat))}</td></tr>`),
+      'Belum ada perangkat terdaftar.');
+
+    $('#panel-sesi').innerHTML = tabel(
+      ['Mulai', 'Device ID', 'Viewer', 'Metode', 'Status', 'Durasi'],
+      sesi.map((s) => `<tr>
+        <td>${esc(waktu(s.started_at))}</td>
+        <td>${esc(s.device_id)}</td>
+        <td class="prosa">${esc(s.viewer_email)}</td>
+        <td>${esc(s.connect_method)}</td>
+        <td>${lencana(
+          s.status === 'active' ? 'ok' : s.status === 'pending' ? 'wait' : 'netral',
+          s.status)}</td>
+        <td>${esc(durasi(s.duration_seconds))}</td></tr>`),
+      'Belum ada sesi tercatat.');
+
+    $('#panel-audit').innerHTML = tabel(
+      ['Waktu', 'Aksi', 'IP', 'Rincian'],
+      audit.map((a) => `<tr>
+        <td>${esc(waktu(a.created_at))}</td>
+        <td>${esc(a.action)}</td>
+        <td>${esc(a.ip_address)}</td>
+        <td class="prosa">${esc(a.payload ? JSON.stringify(a.payload) : '—')}</td></tr>`),
+      'Belum ada entri audit.');
+
+    status(el, '', 'ok');
+  } catch (e) { status(el, e.message, 'bad'); }
+}
+
+$('#btnSegarkan').onclick = muat;
+
+// ── Tab ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('[role="tab"]').forEach((t) => {
+  t.onclick = () => {
+    document.querySelectorAll('[role="tab"]').forEach((x) =>
+      x.setAttribute('aria-selected', String(x === t)));
+    for (const n of ['perangkat', 'sesi', 'audit']) {
+      $(`#panel-${n}`).hidden = n !== t.dataset.tab;
+    }
+  };
+});
+
+saatSesiHabis(() => {
+  hapusToken();
+  tampil($('#kartuData'), false);
+  tampil($('#kartuMasuk'), true);
+  status($('#statusMasuk'), 'Sesi Anda berakhir. Silakan masuk lagi.', 'wait');
+});
+
+if (adaSesi()) {
+  tampil($('#kartuMasuk'), false);
+  tampil($('#kartuData'), true);
+  muat();
+}
+</script>
+</body>
+</html>

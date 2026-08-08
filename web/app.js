@@ -413,6 +413,7 @@ export function pasangHeader(halamanAktif = '') {
     ['/', 'Beranda'],
     ['/agent', 'Agent'],
     ['/viewer', 'Viewer'],
+    ['/dashboard', 'Dashboard'],
   ];
 
   const header = document.createElement('header');
