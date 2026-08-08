@@ -14,6 +14,7 @@
 //! Peta jalan lengkap ada di `docs/NEXT_PLAN.md`.
 
 mod api;
+mod capture;
 mod identitas;
 mod monitor;
 mod signal;
@@ -29,6 +30,7 @@ fn main() -> Result<()> {
 
     match perintah {
         "monitors" => cetak_monitor(),
+        "capture" => perintah_capture(&argumen[1..]),
         "enrol" | "enroll" => jalankan_async(perintah_enrol(&argumen[1..])),
         "connect" => jalankan_async(perintah_connect()),
         "status" => perintah_status(),
@@ -63,6 +65,7 @@ rdp-agent — agent native AetherDesk
 
 PERINTAH
   monitors               Menyebutkan monitor beserta koordinat virtual desktop
+  capture                Menangkap layar dan melaporkan hasilnya
   enrol --token <TOKEN>  Mendaftarkan mesin ini memakai token enrolment
   connect                Menyambung ke server dan tetap online
   status                 Menampilkan identitas perangkat yang tersimpan
@@ -73,12 +76,16 @@ OPSI enrol
   --server <URL>         Alamat server (baku: {baku})
   --alias <NAMA>         Nama yang ditampilkan di dashboard
 
+OPSI capture
+  --monitor <NAMA>       Nama perangkat, mis. \\\\.\\DISPLAY2 (baku: primer)
+  --detik <N>            Lama pengambilan (baku: 3)
+  --simpan <BERKAS.bmp>  Menyimpan frame terakhir untuk diperiksa mata
+
 LINGKUNGAN
   AETHERDESK_DIR         Direktori identitas, menimpa lokasi baku
   AETHERDESK_LOG         Filter log, mis. debug
 
 BELUM TERSEDIA
-  capture     Capture layar (M2)
   input       Injeksi mouse dan papan ketik (M4)
 
 Lihat docs/NEXT_PLAN.md untuk urutan pengerjaannya.",
@@ -132,6 +139,82 @@ fn cetak_monitor() -> Result<()> {
             println!("  {} pada ({}, {})", m.name, m.x, m.y);
         }
         println!("Inilah susunan yang wajib ikut diuji sebelum injeksi input dibuat.");
+    }
+
+    Ok(())
+}
+
+// ── capture ──────────────────────────────────────────────────────────────────
+
+fn perintah_capture(argumen: &[String]) -> Result<()> {
+    let nama = opsi(argumen, "--monitor");
+    let detik: u64 = opsi(argumen, "--detik")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3);
+    let simpan = opsi(argumen, "--simpan");
+
+    let mut dup = capture::Duplikasi::buka(nama.as_deref())?;
+    println!("\nMenangkap {}", dup.nama_output);
+    println!(
+        "  Tampilan   {}×{}  (rotasi {})\n",
+        dup.width,
+        dup.height,
+        capture::nama_rotasi(dup.rotation)
+    );
+
+    let mulai = std::time::Instant::now();
+    let batas = std::time::Duration::from_secs(detik);
+    let mut frame_terakhir = None;
+    let mut jumlah = 0u32;
+    let mut kosong = 0u32;
+    let mut total_byte = 0usize;
+
+    while mulai.elapsed() < batas {
+        match dup.ambil(100)? {
+            Some(f) => {
+                jumlah += 1;
+                total_byte += f.bytes();
+                frame_terakhir = Some(f);
+            }
+            None => kosong += 1,
+        }
+    }
+
+    let berlalu = mulai.elapsed().as_secs_f64();
+
+    // Ukuran permukaan sesungguhnya baru diketahui setelah frame pertama:
+    // ia dibaca dari tekstur yang diserahkan DXGI, bukan dari deskripsi mode.
+    if jumlah > 0 && (dup.surface_width, dup.surface_height) != (dup.width, dup.height) {
+        println!(
+            "{:<26} {}×{} → diputar ke {}×{}",
+            "Permukaan DXGI", dup.surface_width, dup.surface_height, dup.width, dup.height
+        );
+    }
+    println!("{:<26} {}", "Frame berubah", jumlah);
+    println!("{:<26} {}", "Polling tanpa perubahan", kosong);
+    println!("{:<26} {:.1}", "Frame per detik", jumlah as f64 / berlalu);
+    println!(
+        "{:<26} {:.1} MB/dtk mentah",
+        "Laju data BGRA",
+        total_byte as f64 / berlalu / 1_048_576.0
+    );
+
+    if jumlah == 0 {
+        println!(
+            "\nTidak ada satu pun frame berubah. Desktop Duplication hanya\n\
+             menyerahkan frame ketika ada yang bergerak — gerakkan jendela atau\n\
+             putar video di monitor tersebut, lalu jalankan lagi."
+        );
+        return Ok(());
+    }
+
+    if let (Some(f), Some(path)) = (&frame_terakhir, &simpan) {
+        let p = std::path::Path::new(path);
+        capture::tulis_bmp(f, p)?;
+        println!("\nFrame terakhir disimpan: {}", p.display());
+        println!("Buka berkas itu — bila gambarnya benar, seluruh jalur capture sehat.");
+    } else if simpan.is_none() {
+        println!("\nTambahkan --simpan layar.bmp untuk memeriksa hasilnya dengan mata.");
     }
 
     Ok(())

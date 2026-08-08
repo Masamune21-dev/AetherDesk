@@ -277,6 +277,82 @@ Hostname         DESKTOP-9VLA031
 | Audit `device.enrol` | `user_id` **NULL** — tidak ada manusia di baliknya |
 | Agent dihentikan | **offline seketika**, bukan menunggu TTL |
 
+**41. M2a — capture DXGI berjalan di kedua monitor**
+
+Langkah pertama M2, sengaja dipisah dari encoder dan jaringan: frame yang dapat
+dibuka dan dilihat membuktikan jalur capture sehat tanpa satu pun variabel dari
+H.264 maupun WebRTC ikut bermain.
+
+| Monitor | Hasil |
+|---|---|
+| `\\.\DISPLAY1` 1920×1080 | 94 fps, gambar benar |
+| `\\.\DISPLAY2` 1080×1920 tegak | 100 fps, gambar benar |
+| Monitor tak dikenal | ditolak, menyebutkan yang tersedia |
+
+Diverifikasi dengan mata — BMP dikonversi lalu dilihat — bukan hanya dari
+ukuran berkasnya.
+
+**42. Frame hitam sempurna di monitor tegak**
+
+Bug paling menyesatkan sejauh ini. Capture DISPLAY2 menghasilkan berkas
+berdimensi benar, berukuran tepat, **dan hitam seluruhnya**.
+
+Yang memastikan ini bug dan bukan monitor yang memang gelap: area layar yang
+sama diambil lewat GDI `CopyFromScreen` — jalur yang sepenuhnya berbeda — dan
+menghasilkan 20.632 piksel non-hitam, sementara DXGI menghasilkan nol.
+
+Sebabnya: pada monitor tegak, DXGI menyerahkan tekstur dalam orientasi **panel**
+(1920×1080), sementara tekstur singgah dibuat seukuran **desktop** (1080×1920).
+`CopyResource` antara dua tekstur berbeda ukuran **tidak melapor gagal** — ia
+diam saja dan tidak melakukan apa pun, sehingga tekstur singgah tetap berisi
+nol.
+
+Percobaan pertama memperbaikinya lewat `DXGI_OUTDUPL_DESC.ModeDesc`, dan itu
+keliru: ModeDesc justru melaporkan orientasi desktop (1080×1920), bukan
+orientasi tekstur. Yang benar adalah membaca `GetDesc` dari **tekstur yang
+diserahkan `AcquireNextFrame`** — satu-satunya sumber yang tidak menafsirkan
+apa pun.
+
+Keputusan memutar pun kini diambil dari ukuran yang benar-benar diterima, bukan
+dari klaim rotasi: ukuran adalah fakta, rotasi hanya keterangan, dan keduanya
+sudah terbukti dapat berselisih di mesin ini. Ada pemeriksaan penutup yang
+menolak menyerahkan frame bila panjangnya tidak sesuai dimensi yang dijanjikan.
+
+Ini bukan bug pinggiran. Orientasi frame yang keliru akan membuat **setiap klik
+mendarat di tempat yang salah** begitu M4 memetakan koordinat mouse relatif
+terhadap tampilan.
+
+**43. Kasus tepi yang ikut ditangani**
+
+| Kasus | Perlakuan |
+|---|---|
+| `DXGI_ERROR_WAIT_TIMEOUT` | normal — desktop diam, bukan galat |
+| `DXGI_ERROR_ACCESS_LOST` | duplikasi dibangun ulang ke monitor yang sama |
+| `LastPresentTime == 0` | hanya kursor bergerak, VRAM tidak perlu disalin |
+| `RowPitch != lebar × 4` | disalin per baris |
+| `ReleaseFrame` | selalu dipanggil, termasuk saat penyalinan gagal |
+
+`ACCESS_LOST` muncul saat resolusi berubah, saat secure desktop mengambil alih,
+saat sesi berpindah, dan saat driver GPU di-reset. Agent yang menyerah pada
+kejadian pertama akan mati sendiri pada prompt UAC pertama.
+
+Satu galat kompilasi yang layak dicatat karena pesannya tidak menolong:
+`D3D_DRIVER_TYPE_UNKNOWN` hanya sah bila adapter diberikan eksplisit; tanpa
+adapter tipenya wajib `HARDWARE`. Melanggarnya menghasilkan
+"The parameter is incorrect" tanpa menyebut parameter mana.
+
+**44. Yang belum dikerjakan di M2**
+
+| Bagian | Keadaan |
+|---|---|
+| Capture DXGI | **selesai** |
+| Encode H.264 | belum |
+| Kirim lewat WebRTC | belum |
+
+Laju data mentah 745–790 MB/detik menunjukkan kenapa encoder wajib ada: itu
+BGRA tanpa kompresi. Pemutaran dan penyalinan masih di CPU; tempatnya kelak di
+GPU bersama konversi NV12, sesuai STREAMING.md §1.
+
 ### Keadaan M1
 
 | Bagian | Keadaan |

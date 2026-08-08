@@ -85,7 +85,7 @@ pub fn bounding_box(monitors: &[Monitor]) -> Option<(i32, i32, u32, u32)> {
 /// `SetProcessDpiAwarenessContext` tetap berjalan, hanya dengan koordinat
 /// tervirtualisasi, dan itu tercatat di log.
 #[cfg(windows)]
-fn siapkan_dpi() {
+pub(crate) fn siapkan_dpi() {
     use std::sync::Once;
     use windows::Win32::UI::HiDpi::{
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
