@@ -341,17 +341,83 @@ Satu galat kompilasi yang layak dicatat karena pesannya tidak menolong:
 adapter tipenya wajib `HARDWARE`. Melanggarnya menghasilkan
 "The parameter is incorrect" tanpa menyebut parameter mana.
 
-**44. Yang belum dikerjakan di M2**
+**44. M2b — encode H.264 lewat Media Foundation**
+
+Media Foundation dipilih karena ia pintu Windows menuju seluruh encoder
+perangkat keras yang diminta STREAMING.md §3 — NVENC, QuickSync, AMF semuanya
+mendaftarkan diri sebagai MFT — dan karena ia tidak menambah satu pun
+dependensi: seluruh API-nya sudah ada di crate `windows` yang dipakai capture.
+
+| Monitor | Keluaran |
+|---|---|
+| 1920×1080 | 30,1 fps, **1,71 Mbps**, rasio kompresi **1703×** |
+| 1080×1920 tegak | 30 fps, bitstream lengkap, dimensi cocok |
+
+Encoder yang terpilih: `H264 Encoder MFT` — encoder **perangkat lunak** bawaan
+Windows. Enumerasi saat ini meminta MFT sinkron, dan encoder perangkat keras
+hampir selalu asinkron: ia menuntut protokol berbasis peristiwa
+(`METransformNeedInput` / `METransformHaveOutput`) yang bentuknya cukup berbeda
+untuk pantas dikerjakan terpisah, dengan jalur sinkron yang sudah terbukti
+sebagai pembanding. Nama encoder yang terpilih selalu dilaporkan, jadi tidak
+akan pernah ada keraguan mana yang sedang berjalan.
+
+Frame terakhir dipertahankan dan dikirim ulang saat layar diam. Tanpa itu
+aliran berhenti setiap kali tidak ada yang bergerak, dan penerima tidak dapat
+membedakannya dari koneksi yang putus.
+
+**45. Membuktikan bitstream-nya benar tanpa ffmpeg**
+
+Mesin ini tidak punya ffmpeg maupun VLC, jadi "berkasnya jadi" bukan bukti apa
+pun — sekumpulan byte acak juga punya ukuran dan laju bit. Tiga lapis
+pemeriksaan menggantikannya:
+
+**Pemisah NAL dan pembaca SPS ditulis sendiri.** Keduanya bukan perkakas uji
+sekali pakai: paketisasi RTP di M2c bekerja pada NAL satuan, bukan unit akses
+utuh. Pembaca SPS memakai Exp-Golomb lengkap, termasuk membuang emulation
+prevention byte.
+
+Hasilnya: SPS asli dari encoder Microsoft dibaca parser saya sendiri dan
+menghasilkan **1920×1080** — dan **1080×1920** pada monitor tegak. Dua
+implementasi berbeda menyepakati angka yang sama. Kedua vektor SPS itu kini
+menjadi test, disalin byte demi byte dari keluaran sungguhan, bukan karangan.
+
+**Uji pulang-pergi NV12.** Ini menutup celah yang paling berbahaya: bitstream
+H.264 dapat tersusun sepenuhnya sah sambil berisi gambar sampah, karena salah
+tata letak bidang kroma lolos setiap pemeriksaan struktural. Gambar uji berpola
+blok 2×2 — satuan subsampling kroma — dikonversi ke NV12 lalu kembali, dan
+setiap blok wajib tetap warnanya sendiri, bukan warna tetangganya.
+
+**Matriks warna dipatok tepat.** Konversi memakai BT.709 rentang terbatas,
+bukan BT.601, karena materinya beresolusi tinggi. Test-nya memeriksa nilai
+persis: U untuk merah murni adalah **102** pada BT.709, sementara pada BT.601
+angkanya 90. Selisih itulah yang membuat matriks keliru lolos dari pemeriksaan
+longgar semacam "U harus di bawah 100", lalu muncul belakangan sebagai rona
+kulit yang meleset — kesalahan yang bertahan lama justru karena tidak pernah
+cukup mengganggu untuk diselidiki.
+
+Ambang di test itu sempat salah, dan encoder-nya yang benar.
+
+**46. Satu galat runtime yang pesannya tidak menolong**
+
+`MFT_MESSAGE_COMMAND_FLUSH` sebelum streaming dimulai ditolak encoder bawaan
+Windows dengan `E_FAIL` telanjang — masuk akal, karena belum ada apa pun untuk
+dibuang, tetapi pesannya tidak mengatakan itu. Dihapus.
+
+**47. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|
 | Capture DXGI | **selesai** |
-| Encode H.264 | belum |
+| Encode H.264 | **selesai** (perangkat lunak; perangkat keras menyusul) |
 | Kirim lewat WebRTC | belum |
 
-Laju data mentah 745–790 MB/detik menunjukkan kenapa encoder wajib ada: itu
-BGRA tanpa kompresi. Pemutaran dan penyalinan masih di CPU; tempatnya kelak di
-GPU bersama konversi NV12, sesuai STREAMING.md §1.
+Yang belum terbukti: tidak ada dekoder yang pernah benar-benar membuka berkas
+itu dan menampilkan gambarnya. Struktur, dimensi, dan konversi warna sudah
+diverifikasi masing-masing, tetapi bukti visual ujung ke ujung baru datang di
+M2c — ketika browser, yaitu dekoder yang memang jadi sasaran, menampilkannya.
+
+Pemutaran dan konversi warna masih di CPU. Tempatnya kelak di GPU, sesuai
+STREAMING.md §1.
 
 ### Keadaan M1
 

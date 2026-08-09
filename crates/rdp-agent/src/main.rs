@@ -15,6 +15,7 @@
 
 mod api;
 mod capture;
+mod encode;
 mod identitas;
 mod monitor;
 mod signal;
@@ -31,6 +32,7 @@ fn main() -> Result<()> {
     match perintah {
         "monitors" => cetak_monitor(),
         "capture" => perintah_capture(&argumen[1..]),
+        "encode" => perintah_encode(&argumen[1..]),
         "enrol" | "enroll" => jalankan_async(perintah_enrol(&argumen[1..])),
         "connect" => jalankan_async(perintah_connect()),
         "status" => perintah_status(),
@@ -215,6 +217,148 @@ fn perintah_capture(argumen: &[String]) -> Result<()> {
         println!("Buka berkas itu — bila gambarnya benar, seluruh jalur capture sehat.");
     } else if simpan.is_none() {
         println!("\nTambahkan --simpan layar.bmp untuk memeriksa hasilnya dengan mata.");
+    }
+
+    Ok(())
+}
+
+// ── encode ───────────────────────────────────────────────────────────────────
+
+fn perintah_encode(argumen: &[String]) -> Result<()> {
+    let nama = opsi(argumen, "--monitor");
+    let detik: u64 = opsi(argumen, "--detik")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+    let fps: u32 = opsi(argumen, "--fps")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
+    let mbps: f64 = opsi(argumen, "--mbps")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8.0);
+    let keluar = opsi(argumen, "--keluar").unwrap_or_else(|| "layar.h264".into());
+
+    let mut dup = capture::Duplikasi::buka(nama.as_deref())?;
+    let mut enc = encode::H264::baru(dup.width, dup.height, fps, (mbps * 1_000_000.0) as u32)?;
+
+    println!("\nMenangkap {} — {}×{}", dup.nama_output, dup.width, dup.height);
+    println!("Encoder    {}", enc.nama);
+    println!("Sasaran    {fps} fps, {mbps} Mbps\n");
+
+    let mut berkas = std::fs::File::create(&keluar)?;
+    let mulai = std::time::Instant::now();
+    let batas = std::time::Duration::from_secs(detik);
+    let jarak = std::time::Duration::from_micros(1_000_000 / fps.max(1) as u64);
+
+    let mut ditangkap = 0u32;
+    let mut dikode = 0u32;
+    let mut byte_keluar = 0usize;
+    let mut terakhir: Option<capture::Frame> = None;
+    let mut berikutnya = std::time::Instant::now();
+
+    while mulai.elapsed() < batas {
+        // Frame terakhir dipertahankan dan dikirim ulang saat layar diam.
+        // Tanpa itu aliran akan berhenti setiap kali tidak ada yang bergerak,
+        // dan penerima tidak dapat membedakannya dari koneksi yang putus.
+        if let Some(f) = dup.ambil(5)? {
+            terakhir = Some(f);
+            ditangkap += 1;
+        }
+
+        if std::time::Instant::now() < berikutnya {
+            continue;
+        }
+        berikutnya += jarak;
+
+        let Some(f) = &terakhir else { continue };
+        let waktu = mulai.elapsed().as_nanos() as i64 / 100;
+        for au in enc.encode(&f.data, waktu)? {
+            use std::io::Write;
+            byte_keluar += au.len();
+            berkas.write_all(&au)?;
+            dikode += 1;
+        }
+    }
+
+    for au in enc.kuras()? {
+        use std::io::Write;
+        byte_keluar += au.len();
+        berkas.write_all(&au)?;
+        dikode += 1;
+    }
+    drop(berkas);
+
+    let berlalu = mulai.elapsed().as_secs_f64();
+    let mentah = ditangkap as f64 * (dup.width * dup.height * 4) as f64;
+
+    println!("{:<24} {}", "Frame ditangkap", ditangkap);
+    println!("{:<24} {}", "Frame dikode", dikode);
+    println!("{:<24} {:.1}", "Frame per detik", dikode as f64 / berlalu);
+    println!(
+        "{:<24} {:.2} Mbps",
+        "Laju keluar",
+        byte_keluar as f64 * 8.0 / berlalu / 1e6
+    );
+    if mentah > 0.0 {
+        println!(
+            "{:<24} {:.0}×",
+            "Rasio kompresi",
+            mentah / byte_keluar.max(1) as f64
+        );
+    }
+
+    periksa_bitstream(&keluar, dup.width, dup.height)?;
+    Ok(())
+}
+
+/// Memeriksa bahwa berkas keluaran benar-benar H.264 yang tersusun sah.
+///
+/// Ukuran berkas dan laju bit tidak membuktikan apa pun — sekumpulan byte acak
+/// juga punya keduanya. Yang membuktikan adalah SPS yang dapat dibaca dan
+/// menyebutkan dimensi yang sama dengan yang diminta.
+fn periksa_bitstream(path: &str, w: u32, h: u32) -> Result<()> {
+    let isi = std::fs::read(path)?;
+    let nal = encode::pisah_nal(&isi);
+
+    let mut sps = 0;
+    let mut pps = 0;
+    let mut idr = 0;
+    let mut lain = 0;
+    let mut dimensi = None;
+
+    for n in &nal {
+        match encode::tipe_nal(n) {
+            encode::NAL_SPS => {
+                sps += 1;
+                if dimensi.is_none() {
+                    dimensi = encode::baca_sps(n);
+                }
+            }
+            encode::NAL_PPS => pps += 1,
+            encode::NAL_IDR => idr += 1,
+            _ => lain += 1,
+        }
+    }
+
+    println!("\nPemeriksaan bitstream — {path}");
+    println!("  {:<22} {} byte", "Ukuran", isi.len());
+    println!("  {:<22} {}", "NAL", nal.len());
+    println!("  {:<22} SPS {sps}, PPS {pps}, IDR {idr}, lain {lain}", "Jenis");
+
+    match dimensi {
+        Some((dw, dh)) if (dw, dh) == (w, h) => {
+            println!("  {:<22} {dw}×{dh} — cocok", "Dimensi dari SPS");
+        }
+        Some((dw, dh)) => {
+            println!("  {:<22} {dw}×{dh} — TIDAK cocok, diminta {w}×{h}", "Dimensi dari SPS");
+        }
+        None => println!("  {:<22} tidak terbaca", "Dimensi dari SPS"),
+    }
+
+    if sps == 0 || pps == 0 || idr == 0 {
+        println!("\n  Bitstream tidak lengkap — tanpa SPS, PPS, atau keyframe,");
+        println!("  tidak ada dekoder yang dapat memulainya.");
+    } else {
+        println!("\n  Bitstream lengkap. Berkas ini dapat diputar VLC apa adanya.");
     }
 
     Ok(())

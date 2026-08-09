@@ -37,4 +37,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    # Encode H.264 — Media Foundation Transform.
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
 ] }
