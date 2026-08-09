@@ -285,12 +285,22 @@ di worklog butir 34–40.
 
 Permintaan sesi ditolak dengan alasan tertulis sampai M2 ada.
 
-### M2 — Capture satu monitor
+### M2 — Capture satu monitor — **SELESAI** (2026-08-09)
 
 DXGI Desktop Duplication, encode H.264, kirim lewat WebRTC ke viewer web yang
 sudah ada.
 
 **Dapat dicoba:** layar mesin Windows tampil di browser, menggantikan agent tab.
+
+Terbukti di produksi pada perangkat `543 096 477`: 1920×1080 pada 30 fps,
+sekitar 1,7 Mbps, encoder `H264 Encoder MFT`, ICE `connected`. Viewer web tidak
+diubah satu baris pun.
+
+Dua bug ditemukan uji pertama dan sudah diperbaiki — kebocoran refcount COM
+yang mematikan sesi pada detik ke-185, dan gambar beku yang menyamar sebagai
+jaringan lambat saat capture berhenti. Rinciannya di worklog butir 50–52.
+
+Belum diuji: sesi lintas jaringan yang benar-benar memaksa relay TURN.
 
 ### M3 — Enumerasi dan perpindahan monitor
 

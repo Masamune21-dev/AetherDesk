@@ -554,8 +554,25 @@ mod win {
                 let hasil_proses =
                     unsafe { self.transform.ProcessOutput(0, &mut buf, &mut status) };
 
-                let keluaran = std::mem::ManuallyDrop::into_inner(buf[0].pSample.clone());
-                let _ = std::mem::ManuallyDrop::into_inner(buf[0].pEvents.clone());
+                // `take`, bukan `into_inner(clone())`.
+                //
+                // Versi pertama memakai clone, dan itu **membocorkan satu
+                // IMFSample setiap frame**. Mengkloning `Option<IMFSample>`
+                // menaikkan refcount COM; klon itu kemudian dilepas, tetapi
+                // nilai asli yang masih duduk di dalam `ManuallyDrop` tidak
+                // pernah dilepas sama sekali.
+                //
+                // Pada 1080p30 setiap sampel keluaran sekitar 2 MB, jadi
+                // kebocorannya sekitar 60 MB per detik. Sesi pertama di
+                // produksi berjalan 185 detik lalu mati dengan E_OUTOFMEMORY —
+                // "Not enough memory resources are available" — yang menuding
+                // encoder, padahal sebabnya ada di sini.
+                //
+                // `take` memindahkan nilainya keluar dan meninggalkan `buf`
+                // dalam keadaan tidak dipakai lagi, sehingga tidak ada yang
+                // bocor dan tidak ada yang dilepas dua kali.
+                let keluaran = unsafe { std::mem::ManuallyDrop::take(&mut buf[0].pSample) };
+                let _ = unsafe { std::mem::ManuallyDrop::take(&mut buf[0].pEvents) };
 
                 if let Err(e) = hasil_proses {
                     // Bukan galat: encoder sekadar belum punya apa-apa untuk

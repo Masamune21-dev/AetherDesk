@@ -470,22 +470,92 @@ selalu tampil, tingkat izin terpisah, jeda otomatis saat pengguna lokal
 bergerak. Sampai itu ada, agent native ini pantas dijalankan hanya pada mesin
 milik sendiri.
 
-**50. Keadaan M2**
+**50. Sesi pertama berhasil — dan mati setelah 185 detik**
+
+Uji manusia pertama tersambung. Bukti dari kedua sisi:
+
+```
+ICE connection state    connected
+peer connection state   connected
+capture                 \\.\DISPLAY1 1920×1080, H264 Encoder MFT
+sesi 751a2cb5…          active
+viewer                  masamunekazuto21@gmail.com
+```
+
+Lalu, pada detik ke-185:
+
+```
+ERROR rdp_agent::rtc: encode gagal error=Not enough memory resources
+                      are available to complete this operation. (0x8007000E)
+INFO  rdp_agent::rtc: capture berhenti
+```
+
+Galatnya menuding encoder. Sebabnya ada di kode saya.
+
+`ProcessOutput` menerima `MFT_OUTPUT_DATA_BUFFER` yang medan sampelnya
+dibungkus `ManuallyDrop`. Versi pertama mengambil hasilnya dengan
+`ManuallyDrop::into_inner(buf[0].pSample.clone())` — dan `clone` pada
+`Option<IMFSample>` **menaikkan refcount COM**. Klon itu kemudian dilepas,
+tetapi nilai asli yang masih duduk di dalam `ManuallyDrop` tidak pernah
+dilepas sama sekali.
+
+Satu `IMFSample` bocor setiap frame. Pada 1080p30 dengan sampel keluaran
+sekitar 2 MB, itu **sekitar 60 MB per detik** — dan 185 detik adalah tepat
+berapa lama mesin ini bertahan sebelum menyerah.
+
+Diperbaiki dengan `ManuallyDrop::take`, yang memindahkan nilainya keluar
+alih-alih menyalinnya. Terverifikasi: `encode` selama 45 detik menahan memori
+**rata di 371 MB**, bergeser 3,6 MB. Sebelumnya rentang yang sama akan
+menambah sekitar 2,7 GB.
+
+Kebocoran ini juga sempat menjatuhkan `cargo build` — rustc mati dengan
+"The paging file is too small" karena agent yang bocor masih berjalan.
+
+**51. Gambar beku adalah kegagalan berbentuk paling buruk**
+
+Ketika capture mati, penyuap track ikut berhenti tetapi peer connection tetap
+terbuka. Viewer menerima frame terakhir lalu tidak menerima apa pun lagi —
+gambarnya membeku, dan itu **terlihat seperti jaringan lambat**. Orang menunggu
+alih-alih melapor.
+
+Sekarang berhentinya aliran tanpa permintaan menutup peer connection, sehingga
+viewer melihat sesi berakhir. Kegagalan yang kentara jauh lebih baik daripada
+kegagalan yang menyamar.
+
+**52. Dua batasan ICE yang terlihat di log**
+
+`Unable to handle URL in gather_candidates_relay turn:...?transport=tcp` —
+webrtc-rs 0.14 tidak mengumpulkan kandidat relay lewat TCP. Agent hanya
+memakai relay UDP.
+
+Akibatnya lebih sempit daripada kelihatannya: viewer berbasis browser tetap
+dapat memakai TURN TCP, dan relay menjembatani keduanya. Yang benar-benar
+gagal hanyalah keadaan ketika **jaringan agent sendiri** memblokir UDP
+sepenuhnya.
+
+Selain itu ada 10 peringatan `No available ipv6 IP address found` dan
+`could not listen udp 169.254.x.x` — alamat link-local dan mDNS yang tidak
+berguna bagi agent. Tidak merusak apa pun, tetapi mengotori log yang kelak
+dipakai mendiagnosis kegagalan sungguhan.
+
+**53. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|
 | Capture DXGI | **selesai** |
 | Encode H.264 | **selesai** (perangkat lunak; perangkat keras menyusul) |
-| Kirim lewat WebRTC | **kode selesai, menunggu uji viewer** |
+| Kirim lewat WebRTC | **selesai dan terbukti di produksi** |
+
+**M2 selesai.** Layar mesin Windows tampil di browser lewat Quick Connect,
+menggantikan agent berbasis tab — persis sasaran yang ditetapkan NEXT_PLAN.md
+untuk tahap ini.
 
 Biner agent 11,8 MB — masih di bawah batas NFR-PER-06 (20 MB); WebRTC menambah
 sekitar 7 MB.
 
-Yang belum terbukti dan hanya dapat dibuktikan manusia: gambar benar-benar
-muncul di browser. Seluruh jalur sudah diverifikasi sepotong-sepotong — capture
-dilihat dengan mata, dimensi H.264 dibaca dari SPS oleh parser terpisah,
-konversi warna diuji pulang-pergi, TURN diperoleh, signaling tersambung — tetapi
-belum ada satu pun frame yang menempuh seluruhnya sampai ke sebuah layar.
+Yang belum diuji: sesi lintas jaringan yang benar-benar memaksa relay. Sesi
+pertama tersambung cepat, yang menunjukkan jalur langsung, jadi TURN belum
+pernah benar-benar membawa media.
 
 Pemutaran dan konversi warna masih di CPU. Tempatnya kelak di GPU, sesuai
 STREAMING.md §1.

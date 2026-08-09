@@ -194,6 +194,7 @@ impl SesiMedia {
         // ── Penyuap track ───────────────────────────────────────────────────
         let durasi = Duration::from_micros(1_000_000 / atur.fps.max(1) as u64);
         let henti_kirim = Arc::clone(&berhenti);
+        let pc_kirim = Arc::clone(&pc);
         tokio::spawn(async move {
             while let Some(au) = rx_au.recv().await {
                 if henti_kirim.load(Ordering::Relaxed) {
@@ -208,6 +209,19 @@ impl SesiMedia {
                     tracing::warn!(error = %e, "gagal menulis sampel ke track");
                     break;
                 }
+            }
+
+            // Aliran berhenti sebelum ada yang memintanya — capture atau
+            // encoder gagal. Koneksi ditutup supaya viewer melihat sesi
+            // berakhir, bukan gambar yang membeku selamanya.
+            //
+            // Gambar beku adalah kegagalan paling buruk bentuknya: ia terlihat
+            // seperti jaringan lambat, sehingga orang menunggu alih-alih
+            // melapor.
+            if !henti_kirim.load(Ordering::Relaxed) {
+                tracing::error!("aliran media berhenti tanpa diminta, sesi ditutup");
+                henti_kirim.store(true, Ordering::Relaxed);
+                let _ = pc_kirim.close().await;
             }
             tracing::debug!("penyuap track berhenti");
         });
