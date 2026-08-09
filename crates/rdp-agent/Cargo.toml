@@ -52,4 +52,6 @@ windows = { version = "0.58", features = [
     # Encode H.264 — Media Foundation Transform.
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
+    # Injeksi input — SendInput.
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }

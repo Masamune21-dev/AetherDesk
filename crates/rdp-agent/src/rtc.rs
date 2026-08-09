@@ -48,6 +48,13 @@ pub struct Pengaturan {
     pub monitor: Option<String>,
     pub fps: u32,
     pub bitrate: u32,
+    /// Apakah viewer boleh menggerakkan mouse dan mengetik.
+    ///
+    /// Baku **mati**. NEXT_PLAN.md §7.1 mewajibkan izin diminta per tingkat,
+    /// dan agent native tidak punya antarmuka untuk bertanya di tengah sesi.
+    /// Yang tersisa sebagai persetujuan yang jujur adalah keputusan orang yang
+    /// menyalakan agent, diambil sebelum siapa pun tersambung.
+    pub izinkan_kendali: bool,
 }
 
 impl Default for Pengaturan {
@@ -55,12 +62,76 @@ impl Default for Pengaturan {
         Self {
             monitor: None,
             fps: 30,
+            izinkan_kendali: false,
             // 8 Mbps sebagai atap, bukan sasaran. Isi layar kerja jauh lebih
             // mudah dimampatkan daripada video gerak — pengukuran di mesin ini
             // menghasilkan sekitar 1,7 Mbps pada 1080p30.
             bitrate: 8_000_000,
         }
     }
+}
+
+/// Menerapkan satu peristiwa tetikus.
+fn terapkan_mouse(
+    payload: Option<&serde_json::Value>,
+    sasaran: &Sasaran,
+    penjaga: &Arc<std::sync::Mutex<crate::input::PenjagaLokal>>,
+) {
+    use crate::input;
+
+    let Some(p) = payload else { return };
+    let aksi = p.get("aksi").and_then(|a| a.as_str()).unwrap_or("");
+
+    // Gerakan menyertai hampir setiap peristiwa, termasuk tekan dan lepas.
+    // Menerapkannya lebih dulu memastikan klik mendarat di tempat kursor
+    // benar-benar berada saat pengguna menekannya, bukan di tempat gerakan
+    // sebelumnya berhenti.
+    if let (Some(x), Some(y), Some(m)) = (
+        p.get("x").and_then(|v| v.as_f64()),
+        p.get("y").and_then(|v| v.as_f64()),
+        sasaran.monitor.as_ref(),
+    ) {
+        input::gerak(m, sasaran.virt, x, y);
+        if let Ok(mut g) = penjaga.lock() {
+            g.catat_penempatan();
+        }
+    }
+
+    match aksi {
+        "gerak" => {}
+        "tekan" | "lepas" => {
+            let Some(t) = p
+                .get("tombol")
+                .and_then(|v| v.as_u64())
+                .and_then(|n| input::Tombol::dari_nomor(n as u8))
+            else {
+                return;
+            };
+            input::tombol(t, aksi == "tekan");
+        }
+        "gulir" => {
+            if let Some(d) = p.get("delta").and_then(|v| v.as_i64()) {
+                input::gulir(d as i32);
+            }
+        }
+        lain => tracing::debug!(aksi = lain, "aksi tetikus tidak dikenal"),
+    }
+}
+
+/// Menerapkan satu peristiwa papan ketik.
+fn terapkan_papan_ketik(payload: Option<&serde_json::Value>) {
+    let Some(p) = payload else { return };
+    let Some(sc) = p.get("scancode").and_then(|v| v.as_u64()) else {
+        return;
+    };
+    if sc == 0 || sc > u16::MAX as u64 {
+        return;
+    }
+    crate::input::papan_ketik(
+        sc as u16,
+        p.get("tekan").and_then(|v| v.as_bool()).unwrap_or(true),
+        p.get("extended").and_then(|v| v.as_bool()).unwrap_or(false),
+    );
 }
 
 /// Perintah untuk thread capture.
@@ -74,12 +145,23 @@ enum Perintah {
 pub struct SesiMedia {
     pc: Arc<RTCPeerConnection>,
     berhenti: Arc<AtomicBool>,
-    /// Monitor yang sedang dibagikan. Ditulis thread capture, dibaca sisi
-    /// async saat menyusun `MONITOR_LAYOUT`.
-    aktif: Arc<std::sync::Mutex<String>>,
     /// Dipegang hanya agar channel tetap hidup selama sesi. Menjatuhkannya
     /// akan membuat thread capture melihat pengirim hilang.
     _tx_cmd: std::sync::mpsc::Sender<Perintah>,
+}
+
+/// Monitor yang sedang dibagikan, beserta geometri yang dibutuhkan injeksi
+/// input.
+///
+/// Disimpan sebagai satu nilai, bukan dihitung ulang setiap peristiwa mouse.
+/// Enumerasi monitor pada setiap gerakan kursor akan memanggil Win32 puluhan
+/// kali per detik untuk jawaban yang hampir tidak pernah berubah.
+#[derive(Debug, Clone, Default)]
+struct Sasaran {
+    nama: String,
+    monitor: Option<crate::monitor::Monitor>,
+    /// Kotak pembatas seluruh monitor: x, y, lebar, tinggi.
+    virt: (i32, i32, u32, u32),
 }
 
 /// Menyusun pesan `MONITOR_LAYOUT`.
@@ -202,7 +284,8 @@ impl SesiMedia {
         }));
 
         let berhenti = Arc::new(AtomicBool::new(false));
-        let aktif = Arc::new(std::sync::Mutex::new(String::new()));
+        let aktif = Arc::new(std::sync::Mutex::new(Sasaran::default()));
+        let penjaga = Arc::new(std::sync::Mutex::new(crate::input::PenjagaLokal::baru()));
         let (tx_cmd, rx_cmd) = std::sync::mpsc::channel::<Perintah>();
         // Pemberitahuan dari thread capture bahwa monitor aktif berubah.
         let (tx_ubah, mut rx_ubah) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -221,11 +304,26 @@ impl SesiMedia {
 
         let dc_buka = Arc::clone(&dc);
         let aktif_buka = Arc::clone(&aktif);
+        let boleh_kendali = atur.izinkan_kendali;
         dc.on_open(Box::new(move || {
             let dc = Arc::clone(&dc_buka);
             let aktif = Arc::clone(&aktif_buka);
             Box::pin(async move {
-                let nama = aktif.lock().map(|g| g.clone()).unwrap_or_default();
+                // Tingkat izin dikirim lebih dulu, supaya viewer tahu apakah
+                // perlu menangkap papan ketik sama sekali. Viewer yang
+                // menangkapnya tanpa hak hanya akan mencuri pintasan browser
+                // pengguna tanpa menghasilkan apa pun.
+                let _ = dc
+                    .send_text(
+                        serde_json::json!({
+                            "type": "CONTROL_LEVEL",
+                            "payload": { "level": if boleh_kendali { "kendali" } else { "lihat" } },
+                        })
+                        .to_string(),
+                    )
+                    .await;
+
+                let nama = aktif.lock().map(|g| g.nama.clone()).unwrap_or_default();
                 if let Some(p) = pesan_layout(&nama) {
                     let _ = dc.send_text(p).await;
                 }
@@ -233,8 +331,14 @@ impl SesiMedia {
         }));
 
         let tx_cmd_pesan = tx_cmd.clone();
+        let aktif_pesan = Arc::clone(&aktif);
+        let penjaga_pesan = Arc::clone(&penjaga);
+        let dc_balas = Arc::clone(&dc);
         dc.on_message(Box::new(move |msg| {
             let tx = tx_cmd_pesan.clone();
+            let aktif = Arc::clone(&aktif_pesan);
+            let penjaga = Arc::clone(&penjaga_pesan);
+            let dc = Arc::clone(&dc_balas);
             Box::pin(async move {
                 let Ok(teks) = String::from_utf8(msg.data.to_vec()) else {
                     return;
@@ -242,18 +346,53 @@ impl SesiMedia {
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(&teks) else {
                     return;
                 };
-                if v.get("type").and_then(|t| t.as_str()) != Some("MONITOR_SELECT") {
-                    return;
+                let tipe = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                let payload = v.get("payload");
+
+                match tipe {
+                    "MONITOR_SELECT" => {
+                        let Some(nama) =
+                            payload.and_then(|p| p.get("name")).and_then(|n| n.as_str())
+                        else {
+                            return;
+                        };
+                        tracing::info!(monitor = nama, "viewer meminta pindah monitor");
+                        let _ = tx.send(Perintah::Ganti(nama.to_string()));
+                    }
+
+                    "MOUSE" | "KEYBOARD" if boleh_kendali => {
+                        // Pengguna lokal selalu menang. Selama jeda berlaku,
+                        // seluruh input jarak jauh dibuang — bukan diantre,
+                        // karena input yang tertunda lalu diputar sekaligus
+                        // jauh lebih berbahaya daripada input yang hilang.
+                        let dijeda = penjaga.lock().map(|mut p| p.dijeda()).unwrap_or(false);
+                        if dijeda {
+                            let _ = dc
+                                .send_text(
+                                    serde_json::json!({
+                                        "type": "INPUT_PAUSED",
+                                        "payload": { "paused": true },
+                                    })
+                                    .to_string(),
+                                )
+                                .await;
+                            return;
+                        }
+
+                        if tipe == "MOUSE" {
+                            let sasaran = aktif.lock().map(|g| g.clone()).unwrap_or_default();
+                            terapkan_mouse(payload, &sasaran, &penjaga);
+                        } else {
+                            terapkan_papan_ketik(payload);
+                        }
+                    }
+
+                    "MOUSE" | "KEYBOARD" => {
+                        tracing::debug!(tipe, "input diabaikan — kendali tidak diizinkan");
+                    }
+
+                    lain => tracing::debug!(tipe = lain, "pesan kanal kendali tidak dikenal"),
                 }
-                let Some(nama) = v
-                    .get("payload")
-                    .and_then(|p| p.get("name"))
-                    .and_then(|n| n.as_str())
-                else {
-                    return;
-                };
-                tracing::info!(monitor = nama, "viewer meminta pindah monitor");
-                let _ = tx.send(Perintah::Ganti(nama.to_string()));
             })
         }));
 
@@ -262,7 +401,7 @@ impl SesiMedia {
         let aktif_ubah = Arc::clone(&aktif);
         tokio::spawn(async move {
             while rx_ubah.recv().await.is_some() {
-                let nama = aktif_ubah.lock().map(|g| g.clone()).unwrap_or_default();
+                let nama = aktif_ubah.lock().map(|g| g.nama.clone()).unwrap_or_default();
                 if let Some(p) = pesan_layout(&nama) {
                     let _ = dc_ubah.send_text(p).await;
                 }
@@ -361,16 +500,10 @@ impl SesiMedia {
             Self {
                 pc,
                 berhenti,
-                aktif,
                 _tx_cmd: tx_cmd,
             },
             offer.sdp,
         ))
-    }
-
-    /// Monitor yang sedang dibagikan.
-    pub fn monitor_aktif(&self) -> String {
-        self.aktif.lock().map(|g| g.clone()).unwrap_or_default()
     }
 
     /// Menerima SDP answer dari viewer.
@@ -437,7 +570,7 @@ fn jalankan_capture(
     tx_siap: std::sync::mpsc::Sender<std::result::Result<(), String>>,
     berhenti: Arc<AtomicBool>,
     rx_cmd: std::sync::mpsc::Receiver<Perintah>,
-    aktif: Arc<std::sync::Mutex<String>>,
+    aktif: Arc<std::sync::Mutex<Sasaran>>,
     tx_ubah: tokio::sync::mpsc::UnboundedSender<()>,
 ) {
     let (mut dup, mut enc) = match buka_pasangan(atur.monitor.as_deref(), &atur) {
@@ -451,9 +584,17 @@ fn jalankan_capture(
         }
     };
 
-    let mut catat_aktif = |nama: &str| {
+    // Geometri disegarkan bersama nama, bukan dihitung ulang tiap peristiwa
+    // mouse. Ia hanya berubah saat monitor berpindah atau tata letak berubah.
+    let catat_aktif = |nama: &str| {
+        let daftar = crate::monitor::enumerasi().unwrap_or_default();
+        let sasaran = Sasaran {
+            nama: nama.to_string(),
+            monitor: daftar.iter().find(|m| m.name == nama).cloned(),
+            virt: crate::monitor::bounding_box(&daftar).unwrap_or((0, 0, 1, 1)),
+        };
         if let Ok(mut g) = aktif.lock() {
-            *g = nama.to_string();
+            *g = sasaran;
         }
         let _ = tx_ubah.send(());
     };

@@ -17,6 +17,7 @@ mod api;
 mod capture;
 mod encode;
 mod identitas;
+mod input;
 mod monitor;
 mod rtc;
 mod signal;
@@ -78,6 +79,13 @@ OPSI enrol
   --token <TOKEN>        Token enrolment dari dashboard (wajib)
   --server <URL>         Alamat server (baku: {baku})
   --alias <NAMA>         Nama yang ditampilkan di dashboard
+
+OPSI connect
+  --monitor <NAMA>       Monitor yang dibagikan (baku: primer)
+  --fps <N>              Sasaran laju frame (baku: 30)
+  --mbps <N>             Atap bitrate (baku: 8)
+  --izinkan-kendali      Izinkan viewer menggerakkan mouse dan mengetik.
+                         BAKU MATI. Lihat NEXT_PLAN.md §7 sebelum memakainya.
 
 OPSI capture
   --monitor <NAMA>       Nama perangkat, mis. \\\\.\\DISPLAY2 (baku: primer)
@@ -487,6 +495,7 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
             .and_then(|v| v.parse::<f64>().ok())
             .map(|m| (m * 1_000_000.0) as u32)
             .unwrap_or(8_000_000),
+        izinkan_kendali: argumen.iter().any(|a| a == "--izinkan-kendali"),
     };
 
     tracing::info!(
@@ -495,6 +504,23 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
         fps = atur.fps,
         "agent mulai"
     );
+
+    // Dicetak menonjol, bukan disembunyikan di log. Orang yang menyalakan agent
+    // ini perlu tahu persis apa yang baru saja ia izinkan.
+    if atur.izinkan_kendali {
+        println!(
+            "\n  ⚠ KENDALI PENUH AKTIF\n\n  \
+             Siapa pun yang memegang Device ID dan kata sandi sesi dapat\n  \
+             menggerakkan mouse dan mengetik di mesin ini. Agent native belum\n  \
+             menampilkan prompt persetujuan, sehingga tidak ada yang perlu\n  \
+             menyetujui saat sesi dimulai.\n\n  \
+             Menggerakkan mouse fisik akan menjeda input jarak jauh selama\n  \
+             {} detik.\n",
+            input::JEDA_LOKAL.as_secs()
+        );
+    } else {
+        println!("\n  Mode lihat-saja. Tambahkan --izinkan-kendali untuk memberi kendali.\n");
+    }
 
     // Enumerasi sekali di awal. Belum dikirim ke mana pun — MONITOR_LAYOUT
     // baru ada di M3 — tetapi kegagalannya di sini jauh lebih mudah didiagnosis

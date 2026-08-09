@@ -94,6 +94,10 @@ pub fn bgra_ke_nv12(bgra: &[u8], w: usize, h: usize, keluar: &mut Vec<u8>) {
 /// salah tata letak bidang kroma menghasilkan berkas yang lolos setiap
 /// pemeriksaan struktural, dan baru ketahuan saat ada mata yang melihatnya.
 /// Perjalanan pulang-pergi menutup celah itu tanpa perlu dekoder.
+///
+/// Belum dipakai jalur produksi mana pun; ia akan dibutuhkan begitu ada
+/// pemeriksaan frame di sisi agent.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn nv12_ke_bgra(nv12: &[u8], w: usize, h: usize, keluar: &mut Vec<u8>) {
     keluar.clear();
     keluar.resize(w * h * 4, 255);

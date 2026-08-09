@@ -645,7 +645,80 @@ monitor terakhir. Sekarang ia melaporkan seluruh resolusi yang muncul —
 `1920×1080, 1080×1920 — aliran berpindah resolusi` — sehingga berkas yang sehat
 tidak lagi terlihat salah.
 
-**54. Keadaan M2**
+**56. M4 — injeksi mouse dan papan ketik**
+
+Ini modul yang mengubah sifat produk: sampai sekarang agent hanya *menunjukkan*
+layar, dan mulai di sini ia menyerahkan kendali atasnya.
+
+**Kendali tidak menyala dengan sendirinya.** Seluruh jalur mati kecuali agent
+dijalankan dengan `--izinkan-kendali`. NEXT_PLAN.md §7.1 mewajibkan izin
+diminta per tingkat, dan agent native tidak punya antarmuka untuk bertanya di
+tengah sesi. Yang tersisa sebagai persetujuan yang jujur adalah keputusan orang
+yang menyalakan agent, diambil sebelum siapa pun tersambung — dan peringatannya
+dicetak menonjol di terminal, bukan disembunyikan di log.
+
+Viewer diberi tahu tingkatnya lewat `CONTROL_LEVEL` saat kanal terbuka,
+sehingga ia tidak menangkap papan ketik ketika tidak berhak. Viewer yang
+menangkapnya tanpa hak hanya akan mencuri pintasan browser pengguna tanpa
+menghasilkan apa pun.
+
+**Koordinat relatif, bukan piksel.** Viewer mengirim 0,0–1,0 terhadap monitor
+yang sedang dilihat; agent yang menerjemahkannya. Ini menghapus seluruh kelas
+bug yang berasal dari perbedaan resolusi, penskalaan DPI, dan ukuran jendela
+viewer.
+
+Penerjemahannya bukan hal sepele pada susunan mesin ini. `SendInput` dengan
+`MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK` tidak menerima piksel,
+melainkan pecahan dari **seluruh virtual desktop**. Menghitungnya terhadap satu
+monitor saja membuat setiap klik meleset — dan pada susunan berkoordinat
+negatif, meleset ke arah yang berlawanan. Fungsi `ke_absolut` dan
+`bounding_box` yang ditulis di sesi 2 dan sejak itu menganggur akhirnya
+terpakai persis untuk ini.
+
+**Scancode, bukan virtual key.** Mengirim virtual key membuat huruf yang
+diketik bergantung pada tata letak yang aktif di mesin tujuan, sehingga viewer
+ber-QWERTY yang mengakses mesin ber-AZERTY menghasilkan huruf yang salah.
+`KeyboardEvent.code` di browser sudah menyatakan posisi fisik tombol, bukan
+huruf yang tercetak padanya — jadi ia memang pasangan yang tepat untuk
+scancode PS/2.
+
+**57. Pengguna lokal selalu menang**
+
+NEXT_PLAN.md §7.2: "orang yang merebut kembali kendali mesinnya sendiri harus
+selalu menang". Agent membandingkan posisi kursor yang sebenarnya dengan posisi
+terakhir yang **ia sendiri** tempatkan; menyimpang lebih dari 8 piksel berarti
+ada tangan lain di mesin itu, dan injeksi dijeda tiga detik.
+
+Selama jeda, input jarak jauh **dibuang**, bukan diantre. Input yang tertunda
+lalu diputar sekaligus jauh lebih berbahaya daripada input yang hilang.
+
+Viewer diberi tahu lewat `INPUT_PAUSED` dan menyebutkan sebabnya, supaya
+pengguna tidak menyimpulkan koneksinya yang bermasalah.
+
+Ini heuristik, bukan mekanisme yang pasti. Cara yang benar-benar membedakan
+input fisik dari input suntikan adalah low-level hook dengan bendera
+`LLMHF_INJECTED`, dan itu menuntut message loop tersendiri. Heuristik ini
+menangkap kasus yang sebenarnya penting tanpa menambah thread yang harus
+dijaga hidupnya.
+
+**58. Satu jebakan di sisi viewer**
+
+Koordinat dihitung terhadap **gambar**, bukan terhadap elemen video.
+`object-fit: contain` menyisakan pita kosong di sisi yang tidak terisi;
+menghitung terhadap seluruh elemen menggeser seluruh koordinat, dan gesernya
+berubah setiap kali jendela diubah ukurannya. Pada monitor tegak yang
+ditampilkan di jendela lanskap, pita itu lebar sekali.
+
+Gerakan dibatasi sekitar 120 pesan per detik. Tanpa itu satu gerakan cepat
+mengirim ratusan pesan yang seluruhnya menggambarkan jalur yang sama.
+
+**Belum ada:** `Ctrl+Alt+Del` — tidak dapat disuntikkan `SendInput` dan
+memerlukan service LocalSystem (NEXT_PLAN.md §6.3), serta Keyboard Lock API
+untuk menahan pintasan yang ditelan browser (§6.4).
+
+**Belum terverifikasi:** injeksi belum pernah dicoba dari viewer sungguhan.
+
+**59. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

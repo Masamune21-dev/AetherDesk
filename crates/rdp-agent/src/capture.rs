@@ -27,6 +27,11 @@ pub struct Frame {
     /// BGRA8, rapat — `width * 4` byte per baris, tanpa padding.
     pub data: Vec<u8>,
     /// Berapa frame desktop yang terakumulasi sejak pengambilan sebelumnya.
+    ///
+    /// Berguna untuk mendeteksi encoder yang tertinggal — nilai yang terus
+    /// naik berarti frame dibuang sebelum sempat dikodekan. Belum ada yang
+    /// membacanya.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub accumulated: u32,
 }
 
