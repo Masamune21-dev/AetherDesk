@@ -367,6 +367,11 @@ $('#btnHubungkan').onclick = async () => {
 
   kanal.pc.ontrack = (e) => {
     const video = $('#layar');
+    // Meminta browser tidak menumpuk jitter buffer. Bakunya disetel untuk
+    // video yang enak ditonton, tempat beberapa ratus milidetik penyangga
+    // menukar latensi dengan kemulusan. Pada remote desktop pertukaran itu
+    // terbalik: yang dibutuhkan adalah gambar terbaru, sekarang.
+    try { e.receiver.playoutDelayHint = 0; } catch { /* belum didukung */ }
     video.srcObject = e.streams[0];
     // `tabindex` membuat elemen video dapat menerima peristiwa papan ketik;
     // tanpa itu `keydown` tidak akan pernah sampai ke sini.

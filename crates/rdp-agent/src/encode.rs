@@ -462,6 +462,56 @@ mod win {
         Ok((transform, aktivasi, nama))
     }
 
+    /// Menyalakan mode latensi rendah pada encoder.
+    ///
+    /// **Ini bukan penyetelan halus, melainkan perbedaan antara dapat dipakai
+    /// dan tidak.** Tanpa `AVLowLatencyMode`, encoder Media Foundation menahan
+    /// frame untuk lookahead: pengukuran di mesin ini menunjukkan **12 frame
+    /// tertahan**, yaitu sekitar 400 ms sebelum satu gambar pun keluar.
+    ///
+    /// Pada aliran video biasa penundaan itu tidak terasa. Pada remote desktop
+    /// ia terasa persis pada hal yang paling penting: pengguna menekan tombol,
+    /// dan hasilnya baru terlihat hampir setengah detik kemudian. Gerakan
+    /// mouse tetap terasa mulus karena kursor yang dilihat adalah kursor lokal
+    /// browser — sehingga gejalanya menyesatkan, seolah hanya klik dan ketikan
+    /// yang lambat.
+    ///
+    /// Ditetapkan **sebelum** tipe media, karena sebagian encoder mengunci
+    /// konfigurasi pipanya begitu tipe keluaran diterima.
+    ///
+    /// Kegagalan tidak fatal: tidak semua encoder mendukung setiap setelan, dan
+    /// yang tidak didukung sekadar diabaikan. Tetapi mode latensi rendah cukup
+    /// menentukan untuk pantas dicatat bila ia gagal.
+    fn atur_latensi_rendah(transform: &IMFTransform, bitrate: u32) {
+        use windows::core::{Interface, VARIANT};
+
+        let Ok(codec) = transform.cast::<ICodecAPI>() else {
+            tracing::warn!("encoder tidak menyediakan ICodecAPI — latensi akan tinggi");
+            return;
+        };
+
+        unsafe {
+            match codec.SetValue(&CODECAPI_AVLowLatencyMode, &VARIANT::from(true)) {
+                Ok(()) => tracing::debug!("mode latensi rendah aktif"),
+                Err(e) => tracing::warn!(error = %e, "mode latensi rendah ditolak encoder"),
+            }
+
+            // Kendali laju sengaja **tidak** dipaksa ke CBR.
+            //
+            // Percobaan pertama memasangnya, dan hasilnya laju keluar naik dari
+            // 1,71 menjadi 8,18 Mbps untuk isi layar yang sama: CBR mengisi
+            // paksa sampai atap meskipun tidak ada yang perlu dikirim. Pada
+            // video gerak itu wajar, pada layar kerja yang sebagian besar diam
+            // itu pemborosan yang dibayar pengguna.
+            //
+            // Yang tersisa penting justru sasaran lajunya. Mode latensi rendah
+            // membuang lookahead, dan tanpa lookahead encoder menghasilkan laju
+            // yang hampir rata — sehingga angka ini berhenti menjadi atap dan
+            // menjadi laju yang benar-benar dipakai.
+            let _ = codec.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &VARIANT::from(bitrate));
+        }
+    }
+
     /// Menyusun dua u32 menjadi satu atribut UINT64, sesuai kebiasaan
     /// Media Foundation untuk ukuran dan rasio.
     fn pasangan(tinggi: u32, rendah: u32) -> u64 {
@@ -472,6 +522,7 @@ mod win {
         pub fn baru(width: u32, height: u32, fps: u32, bitrate: u32) -> Result<Self> {
             mf_startup()?;
             let (transform, aktivasi, nama) = cari_encoder()?;
+            atur_latensi_rendah(&transform, bitrate);
 
             // Tipe keluaran wajib ditetapkan lebih dulu. Media Foundation
             // menolak tipe masukan sebelum tahu hendak menghasilkan apa, dan

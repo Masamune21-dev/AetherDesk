@@ -82,8 +82,8 @@ OPSI enrol
 
 OPSI connect
   --monitor <NAMA>       Monitor yang dibagikan (baku: primer)
-  --fps <N>              Sasaran laju frame (baku: 30)
-  --mbps <N>             Atap bitrate (baku: 8)
+  --fps <N>              Sasaran laju frame (baku: 30; 60 terbukti sanggup)
+  --mbps <N>             Sasaran bitrate (baku: 4)
   --izinkan-kendali      Izinkan viewer menggerakkan mouse dan mengetik.
                          BAKU MATI. Lihat NEXT_PLAN.md §7 sebelum memakainya.
 
@@ -267,6 +267,11 @@ fn perintah_encode(argumen: &[String]) -> Result<()> {
     let mut ditangkap = 0u32;
     let mut dikode = 0u32;
     let mut byte_keluar = 0usize;
+    // Berapa frame yang sudah masuk encoder tetapi belum keluar. Inilah
+    // kedalaman pipa encoder, dan pada 30 fps setiap frame yang tertahan
+    // berarti 33 ms tambahan sebelum gambar sampai ke mata.
+    let mut tertahan = 0i64;
+    let mut tertahan_maks = 0i64;
     let mut terakhir: Option<capture::Frame> = None;
     let mut berikutnya = std::time::Instant::now();
 
@@ -315,7 +320,11 @@ fn perintah_encode(argumen: &[String]) -> Result<()> {
 
         let Some(f) = &terakhir else { continue };
         let waktu = mulai.elapsed().as_nanos() as i64 / 100;
-        for au in enc.encode(&f.data, waktu)? {
+        let unit = enc.encode(&f.data, waktu)?;
+        tertahan += 1;
+        tertahan -= unit.len() as i64;
+        tertahan_maks = tertahan_maks.max(tertahan);
+        for au in unit {
             use std::io::Write;
             byte_keluar += au.len();
             berkas.write_all(&au)?;
@@ -336,6 +345,12 @@ fn perintah_encode(argumen: &[String]) -> Result<()> {
 
     println!("{:<24} {}", "Frame ditangkap", ditangkap);
     println!("{:<24} {}", "Frame dikode", dikode);
+    println!(
+        "{:<24} {} frame  (~{:.0} ms pada {fps} fps)",
+        "Tertahan di encoder",
+        tertahan_maks,
+        tertahan_maks as f64 * 1000.0 / fps.max(1) as f64
+    );
     println!("{:<24} {:.1}", "Frame per detik", dikode as f64 / berlalu);
     println!(
         "{:<24} {:.2} Mbps",
@@ -494,7 +509,7 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
         bitrate: opsi(argumen, "--mbps")
             .and_then(|v| v.parse::<f64>().ok())
             .map(|m| (m * 1_000_000.0) as u32)
-            .unwrap_or(8_000_000),
+            .unwrap_or(4_000_000),
         izinkan_kendali: argumen.iter().any(|a| a == "--izinkan-kendali"),
     };
 

@@ -718,7 +718,65 @@ untuk menahan pintasan yang ditelan browser (§6.4).
 
 **Belum terverifikasi:** injeksi belum pernah dicoba dari viewer sungguhan.
 
-**59. Keadaan M2**
+**59. Delay 400 ms, dan gejalanya yang menyesatkan**
+
+Laporan dari uji: kendali bekerja, "tapi agak delay — mouse realtime, ketika
+pencet dan scroll delay, ketik juga".
+
+Pola itu justru yang memberi jawabannya. Gerakan mouse terasa seketika karena
+kursor yang terlihat adalah **kursor browser pengguna sendiri** — DXGI tidak
+menyertakan kursor dalam gambar desktop, jadi tidak ada perjalanan jaringan
+sama sekali di sana. Klik, gulir, dan ketikan baru terlihat hasilnya ketika
+**frame video menyusul**. Yang lambat videonya, bukan inputnya.
+
+Pengukuran menemukan tempatnya:
+
+```
+Tertahan di encoder      12 frame  (~400 ms pada 30 fps)
+```
+
+Encoder Media Foundation menahan frame untuk lookahead karena
+`CODECAPI_AVLowLatencyMode` tidak pernah dinyalakan. Pada video biasa itu
+wajar; pada remote desktop ia mendarat persis pada hal yang paling penting.
+
+Setelah dinyalakan: **0 frame tertahan.**
+
+Ditetapkan sebelum tipe media, karena sebagian encoder mengunci konfigurasi
+pipanya begitu tipe keluaran diterima.
+
+**60. Pertukaran yang muncul bersamanya**
+
+Laju keluar melonjak dari 1,71 menjadi 8,2 Mbps untuk isi layar yang sama.
+Dugaan pertama menyalahkan CBR yang ikut dipasang — dan itu keliru: melepasnya
+tidak mengubah apa pun. Sebabnya mode latensi rendah itu sendiri. Tanpa
+lookahead, encoder kehilangan kemampuan menabung bit pada bagian yang mudah,
+sehingga lajunya menjadi hampir rata.
+
+Jadi pertukarannya nyata dan tidak dapat dihindari di encoder ini: **400 ms
+pada 1,7 Mbps, atau nol pada laju rata**. Untuk remote desktop latensi menang.
+
+Yang berubah sebagai gantinya adalah arti angka bitrate: ia berhenti menjadi
+atap yang jarang tersentuh dan menjadi laju yang benar-benar dipakai. Karena
+itu bakunya diturunkan dari 8 ke 4 Mbps. Terukur presisi: setelan 2 memberi
+2,20 Mbps, setelan 4 memberi 4,40 Mbps.
+
+**61. 60 fps sanggup**
+
+| fps | Tercapai | Laju | Tertahan |
+|---|---|---|---|
+| 30 | 30,0 | 4,4 Mbps | 0 frame |
+| 60 | 60,0 | 4,4 Mbps | 0 frame |
+
+Encoder **perangkat lunak** menahan 1080p60 tanpa tertinggal. Bakunya tetap 30
+karena mesin agent tidak selalu sekuat ini, tetapi `--fps 60` terbukti.
+
+Dua penyangga lain ikut dipendekkan: antrean unit akses dari 8 slot menjadi 2 —
+delapan slot berarti seperempat detik gambar basi yang tetap harus dikirim
+sebelum yang terbaru sampai — dan viewer meminta `playoutDelayHint = 0`, karena
+baku browser menukar latensi dengan kemulusan, pertukaran yang terbalik pada
+remote desktop.
+
+**62. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

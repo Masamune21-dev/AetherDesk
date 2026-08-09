@@ -63,10 +63,15 @@ impl Default for Pengaturan {
             monitor: None,
             fps: 30,
             izinkan_kendali: false,
-            // 8 Mbps sebagai atap, bukan sasaran. Isi layar kerja jauh lebih
-            // mudah dimampatkan daripada video gerak — pengukuran di mesin ini
-            // menghasilkan sekitar 1,7 Mbps pada 1080p30.
-            bitrate: 8_000_000,
+            // 4 Mbps, dan sejak mode latensi rendah menyala angka ini adalah
+            // laju yang benar-benar dipakai, bukan atap yang jarang tersentuh.
+            //
+            // Tanpa lookahead, encoder menghasilkan laju yang hampir rata:
+            // pengukuran di mesin ini memberi 2,20 Mbps pada setelan 2 dan
+            // 4,40 Mbps pada setelan 4. Sebelumnya 8 Mbps dipilih sebagai atap
+            // dengan asumsi VBR akan turun sendiri ke sekitar 1,7 Mbps —
+            // asumsi yang berhenti berlaku begitu latensi diprioritaskan.
+            bitrate: 4_000_000,
         }
     }
 }
@@ -425,7 +430,12 @@ impl SesiMedia {
         }));
 
         // ── Thread capture dan encode ───────────────────────────────────────
-        let (tx_au, mut rx_au) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
+        // Antrean sengaja pendek. Setiap frame yang menunggu di sini adalah
+        // latensi murni: pada 30 fps, delapan slot berarti seperempat detik
+        // gambar basi yang tetap harus dikirim sebelum yang terbaru sampai.
+        // Dengan dua slot, thread capture segera tertahan dan justru berhenti
+        // menghasilkan frame yang sudah kalah cepat.
+        let (tx_au, mut rx_au) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
         let (tx_siap, rx_siap) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
         let henti_thread = Arc::clone(&berhenti);
         let atur_thread = atur.clone();
