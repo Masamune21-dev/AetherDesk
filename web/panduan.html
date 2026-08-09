@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Panduan — AetherDesk</title>
+<link rel="stylesheet" href="/style.css?v=11">
+</head>
+<body>
+<div class="wrap">
+  <div class="judul-halaman">
+    <span class="eyebrow">Panduan penggunaan</span>
+    <h1>Dari nol sampai layar muncul</h1>
+    <p>Urutannya mengikat. Melewati langkah pertama membuat dua langkah
+       berikutnya mustahil, dan itu sumber kebingungan yang paling sering.</p>
+  </div>
+
+  <!-- ── 1. Organisasi ──────────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head"><h2>Langkah 1 · Organisasi</h2></div>
+    <div class="panduan-isi">
+      <p>Seluruh perangkat dan pengguna hidup di dalam satu organisasi. Tanpa
+         itu, tidak ada tempat bagi perangkat untuk terdaftar.</p>
+      <ol>
+        <li>Buka <a href="/setup">Buat organisasi</a>.</li>
+        <li>Isi nama organisasi, lalu email dan kata sandi untuk akun pertama.
+            Akun ini menjadi pemilik.</li>
+        <li>Setelah selesai, Anda dapat masuk dari halaman
+            <a href="/viewer">Viewer</a> maupun
+            <a href="/dashboard">Dashboard</a>.</li>
+      </ol>
+      <div class="catatan"><span>Organisasi cukup dibuat sekali. Bila sudah
+        pernah membuatnya, langsung masuk memakai akun yang ada.</span></div>
+    </div>
+  </section>
+
+  <!-- ── 2. Berbagi layar ───────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head"><h2>Langkah 2 · Bagikan layar</h2></div>
+    <div class="panduan-isi">
+      <p>Dilakukan di komputer <strong>yang akan diakses</strong>, bukan di
+         komputer Anda.</p>
+
+      <h3>Lewat browser — lihat saja</h3>
+      <ol>
+        <li>Buka <a href="/agent">Agent</a> di komputer tujuan, lalu masuk.</li>
+        <li>Pilih layar yang dibagikan saat browser memintanya.</li>
+        <li>Catat <strong>Device ID</strong> dan <strong>kata sandi sesi</strong>
+            yang muncul. Keduanya untuk dibacakan kepada orang yang akan
+            menyambung.</li>
+        <li>Biarkan tab itu terbuka selama sesi berlangsung.</li>
+      </ol>
+
+      <h3>Lewat aplikasi Windows — kendali penuh</h3>
+      <p>Aplikasinya belum dirilis. Setelah tersedia, ia dipasang sekali dan
+         berjalan sendiri setiap komputer menyala, sehingga tidak ada tab yang
+         perlu dibiarkan terbuka.</p>
+
+      <div class="catatan"><span>Browser <strong>tidak dapat</strong>
+        menggerakkan mouse atau mengetik di luar halamannya sendiri. Itu batas
+        keamanan yang disengaja — situs yang bisa mengetik di mesin
+        pengunjungnya adalah definisi dari sebuah eksploitasi. Kendali penuh
+        hanya mungkin lewat aplikasi.</span></div>
+    </div>
+  </section>
+
+  <!-- ── 3. Menyambung ──────────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head"><h2>Langkah 3 · Hubungkan</h2></div>
+    <div class="panduan-isi">
+      <ol>
+        <li>Buka <a href="/viewer">Viewer</a> di komputer Anda, lalu masuk.</li>
+        <li>Masukkan Device ID — boleh diketik apa adanya maupun berkelompok,
+            <span class="perintah">942 716 382</span></li>
+        <li>Masukkan kata sandi sesi, lalu tekan Hubungkan.</li>
+        <li>Tunggu persetujuan dari komputer tujuan. Permintaan tidak pernah
+            diterima diam-diam.</li>
+      </ol>
+      <p>Setelah tersambung, HUD di pojok menampilkan latensi, FPS, resolusi,
+         dan bitrate. Bila perangkat tujuan punya lebih dari satu layar, tombol
+         pemilih monitor muncul di bawah gambar.</p>
+    </div>
+  </section>
+
+  <!-- ── Kata sandi ─────────────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head"><h2>Dua jenis kata sandi</h2></div>
+    <div class="panduan-isi">
+      <h3>Kata sandi sesi</h3>
+      <p>Delapan karakter acak, berotasi setiap kali diganti. Ditujukan untuk
+         bantuan sesaat yang dibacakan lewat telepon — yang sempat bocor tidak
+         lagi berlaku setelah dirotasi.</p>
+
+      <h3>Kata sandi tetap</h3>
+      <p>Dipilih sendiri, minimal sepuluh karakter, dan tidak berotasi. Untuk
+         mesin yang Anda akses berulang kali. Hanya tersedia lewat aplikasi.</p>
+
+      <div class="catatan"><span>Kata sandi tetap tidak pernah berganti
+        sendiri. Siapa pun yang mengetahuinya dapat masuk sampai Anda
+        menggantinya.</span></div>
+    </div>
+  </section>
+
+  <!-- ── Bila gagal ─────────────────────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head"><h2>Bila tidak tersambung</h2></div>
+    <div class="panduan-isi">
+      <h3>«perangkat sedang offline»</h3>
+      <p>Tab agent tertutup, atau aplikasinya tidak berjalan. Buka kembali di
+         komputer tujuan.</p>
+
+      <h3>«device ID atau password salah»</h3>
+      <p>Pesan ini sengaja sama untuk seluruh sebab kegagalan, sehingga tidak
+         dapat dipakai menebak Device ID mana yang hidup. Periksa ulang
+         keduanya. Setelah lima kegagalan, perangkat itu dijeda lima belas
+         menit — dan selama jeda, kata sandi yang benar pun ditolak.</p>
+
+      <h3>Tersambung lalu gambar membeku</h3>
+      <p>Sesi berakhir dari sisi perangkat. Halaman akan memberi tahu; sambung
+         ulang bila perlu.</p>
+
+      <h3>Gagal setelah menunggu lama</h3>
+      <p>Jaringan di kedua sisi tidak dapat saling menjangkau langsung dan relay
+         tidak terpakai. Halaman viewer menampilkan diagnosanya berdasarkan
+         jenis kandidat yang terkumpul, bukan tebakan.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Keamanan</h2></div>
+    <div class="panduan-isi">
+      <ul>
+        <li>Layar hanya mengalir setelah permintaan disetujui di sisi
+            perangkat.</li>
+        <li>Kata sandi disimpan sebagai hash Argon2id, tidak pernah apa
+            adanya.</li>
+        <li>Setiap upaya sambung tercatat, termasuk yang Device ID-nya tidak
+            pernah ada.</li>
+        <li>Token akses berumur 15 menit dan ditandatangani Ed25519.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    aetherdesk.masamune.my.id<br>
+    <a href="https://github.com/Masamune21-dev/AetherDesk">github.com/Masamune21-dev/AetherDesk</a>
+  </footer>
+</div>
+
+<script type="module">
+import { pasangHeader } from '/app.js?v=11';
+pasangHeader('/panduan');
+</script>
+</body>
+</html>

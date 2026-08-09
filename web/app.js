@@ -411,6 +411,7 @@ export function pasangMedan() {
 export function pasangHeader(halamanAktif = '') {
   const tautan = [
     ['/', 'Beranda'],
+    ['/panduan', 'Panduan'],
     ['/agent', 'Agent'],
     ['/viewer', 'Viewer'],
     ['/dashboard', 'Dashboard'],

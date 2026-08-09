@@ -733,11 +733,266 @@ footer {
 a { color: var(--signal-b); text-underline-offset: 3px; }
 a:focus-visible { outline: 2px solid var(--signal-b); outline-offset: 3px; border-radius: 2px; }
 
+/* ── Hero beranda ────────────────────────────────────────────────────────
+   Beranda adalah satu-satunya halaman yang dilihat orang sebelum memutuskan
+   mempercayai produk ini, jadi ia mendapat ruang lebih daripada halaman
+   lainnya. Yang bertambah hanyalah ruang dan satu diagram — bukan warna,
+   bukan bayangan, bukan animasi masuk. */
+
+.hero-utama {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s6);
+  padding: var(--s12) 0 var(--s10);
+}
+
+.hero-utama h1 {
+  font-family: var(--mono);
+  font-size: var(--t-hero);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.hero-utama h1 em {
+  font-style: normal;
+  background: var(--grad-signal);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-utama .pengantar {
+  font-size: var(--t-lg);
+  max-width: 46ch;
+  color: var(--ink-2);
+}
+
+.hero-aksi { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
+
+/* Tautan yang berperan sebagai tombol. Dibuat terpisah dari `button` karena
+   navigasi memang milik `<a>` — tombol yang menavigasi merusak klik tengah,
+   buka di tab baru, dan pembacaan oleh teknologi bantu. */
+.tombol-tautan {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  min-height: 2.875rem;
+  padding: 0 var(--s6);
+  background: var(--grad-signal);
+  color: var(--accent-ink);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+.tombol-tautan:hover { filter: brightness(1.12) saturate(1.1); }
+.tombol-tautan:active { transform: translateY(1px); }
+
+.tombol-tautan.sekunder {
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+}
+.tombol-tautan.sekunder:hover {
+  background: var(--surface-3);
+  border-color: var(--line-lit);
+  filter: none;
+}
+
+/* Unduhan yang belum ada. Dibuat `<span>`, bukan `<a>` tanpa href: tautan yang
+   tidak menuju ke mana-mana tetap terbaca sebagai tautan oleh pembaca layar,
+   dan itu menjanjikan sesuatu yang belum ada. */
+.tombol-tautan.belum {
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px dashed var(--line-2);
+  cursor: not-allowed;
+}
+
+/* ── Diagram jalur sinyal ────────────────────────────────────────────────
+   Satu-satunya tempat gradien sinyal muncul sebagai gambar, dan alasannya
+   tepat: yang digambar memang dua ujung koneksi beserta lintasan di antaranya. */
+
+.jalur-diagram {
+  display: block;
+  width: 100%;
+  max-width: 34rem;
+  height: auto;
+}
+
+.jalur-diagram .simpul { fill: var(--surface-2); stroke: var(--line-lit); }
+.jalur-diagram .label {
+  fill: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.jalur-diagram .nadi { animation: rambat 3.2s linear infinite; }
+
+@keyframes rambat {
+  from { offset-distance: 0%; opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  to   { offset-distance: 100%; opacity: 0; }
+}
+
+/* ── Langkah berurut ─────────────────────────────────────────────────────
+   Penomoran di sini bukan hiasan: urutannya mengikat, dan melewati langkah
+   pertama membuat dua langkah berikutnya mustahil. */
+
+.langkah { display: flex; flex-direction: column; gap: var(--s3); counter-reset: langkah; }
+
+.langkah-baris {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: var(--s4);
+  align-items: start;
+  padding: var(--s4) 0;
+  border-top: 1px solid var(--line);
+}
+.langkah-baris:first-child { border-top: 0; }
+
+.langkah-baris::before {
+  counter-increment: langkah;
+  content: counter(langkah);
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+}
+
+.langkah-baris .isi { display: flex; flex-direction: column; gap: var(--s1); }
+.langkah-baris .judul {
+  font-family: var(--mono);
+  font-size: var(--t-base);
+  font-weight: 600;
+  color: var(--ink);
+}
+.langkah-baris .ket { font-size: var(--t-sm); color: var(--ink-3); }
+
+/* ── Perbandingan kemampuan ──────────────────────────────────────────────
+   Bagian paling penting di beranda: orang yang mengira browser sudah cukup
+   akan menyimpulkan produknya rusak ketika mouse-nya tidak bergerak. */
+
+.banding { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--s4); }
+
+.banding-kolom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.banding-kolom.utama { border-color: var(--line-lit); background: var(--surface-2); }
+
+.banding-kolom h3 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--t-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.banding-daftar { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.banding-daftar li {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  gap: var(--s2);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+/* Tanda tidak pernah hanya berupa warna: bentuknya ikut membedakan, sehingga
+   terbaca oleh mata yang tidak membedakan warna. */
+.banding-daftar li::before { font-family: var(--mono); font-size: var(--t-sm); }
+.banding-daftar li.ya::before  { content: "+"; color: var(--ok); }
+.banding-daftar li.tidak::before { content: "−"; color: var(--ink-3); }
+.banding-daftar li.tidak { color: var(--ink-3); }
+
+/* ── Panduan ─────────────────────────────────────────────────────────────── */
+
+.panduan-isi { display: flex; flex-direction: column; gap: var(--s4); }
+.panduan-isi h3 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--t-base);
+  font-weight: 600;
+}
+.panduan-isi ol, .panduan-isi ul { margin: 0; padding-left: var(--s5); color: var(--ink-2); }
+.panduan-isi li { margin-bottom: var(--s2); }
+.panduan-isi li::marker { color: var(--ink-3); font-family: var(--mono); }
+
+/* Blok perintah. Bukan sekadar `code`: ini dibaca lalu diketik ulang, jadi ia
+   perlu ruang dan dapat disalin tanpa ikut membawa teks penjelasnya. */
+.perintah {
+  display: block;
+  padding: var(--s3) var(--s4);
+  background: var(--void);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  color: var(--ink);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Isinya **wajib** dibungkus satu elemen, mis. `<span>`.
+ *
+ * Sebagai flex container, setiap anak menjadi flex item — termasuk simpul teks
+ * telanjang dan `<strong>` di tengah kalimat. Akibatnya satu kalimat pecah
+ * menjadi beberapa kolom yang berdiri sendiri, dan gejalanya hanya terlihat
+ * ketika kalimatnya kebetulan memuat penekanan. Pernah terjadi di halaman
+ * panduan. */
+.catatan {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s4);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border-radius: var(--radius);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+.catatan::before {
+  content: "!";
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--warn);
+  border-radius: 50%;
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
 /* ── Responsif ───────────────────────────────────────────────────────────── */
 
 @media (max-width: 40rem) {
   .wrap { padding: var(--s8) var(--s4) var(--s12); }
   .hero { padding: var(--s6) 0 var(--s5); }
+  .hero-utama { padding: var(--s6) 0 var(--s6); gap: var(--s5); }
+  .hero-aksi > * { flex: 1 1 100%; }
+  .langkah-baris { grid-template-columns: 1.75rem 1fr; gap: var(--s3); }
   .card { padding: var(--s5); }
   .card::before { left: var(--s5); right: var(--s5); }
   .app-header { padding: 0 var(--s4); gap: var(--s3); }

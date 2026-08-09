@@ -28,6 +28,105 @@ use eframe::egui;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+// Token warna, disalin dari sistem desain web supaya jendela dan halaman
+// terbaca sebagai satu produk. Bukan tema gelap bawaan egui.
+const VOID: egui::Color32 = egui::Color32::from_rgb(0x07, 0x08, 0x0D);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x10, 0x13, 0x1C);
+const SURFACE_2: egui::Color32 = egui::Color32::from_rgb(0x16, 0x1A, 0x26);
+const LINE: egui::Color32 = egui::Color32::from_rgb(0x1E, 0x23, 0x31);
+const LINE_2: egui::Color32 = egui::Color32::from_rgb(0x2B, 0x31, 0x45);
+const INK: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xF1, 0xF8);
+const INK_2: egui::Color32 = egui::Color32::from_rgb(0x9A, 0xA3, 0xBD);
+const INK_3: egui::Color32 = egui::Color32::from_rgb(0x62, 0x6C, 0x88);
+const SIGNAL_B: egui::Color32 = egui::Color32::from_rgb(0x4C, 0xC9, 0xF0);
+const OK: egui::Color32 = egui::Color32::from_rgb(0x3D, 0xDC, 0x97);
+const WARN: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xA2, 0x61);
+const BAD: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x6B, 0x6B);
+
+const RUANG_BAGIAN: f32 = 16.0;
+
+/// Menerapkan token warna dan ruang ke seluruh jendela.
+pub fn atur_gaya(ctx: &egui::Context) {
+    let mut gaya = (*ctx.style()).clone();
+
+    let v = &mut gaya.visuals;
+    v.dark_mode = true;
+    v.panel_fill = VOID;
+    v.window_fill = VOID;
+    v.extreme_bg_color = VOID;
+    v.faint_bg_color = SURFACE;
+    v.override_text_color = Some(INK_2);
+    v.selection.bg_fill = SIGNAL_B.linear_multiply(0.35);
+    v.hyperlink_color = SIGNAL_B;
+
+    // Sudut 4px, bukan membulat besar — sama seperti kartu di web.
+    for w in [
+        &mut v.widgets.noninteractive,
+        &mut v.widgets.inactive,
+        &mut v.widgets.hovered,
+        &mut v.widgets.active,
+        &mut v.widgets.open,
+    ] {
+        w.rounding = egui::Rounding::same(4.0);
+    }
+
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, LINE);
+    v.widgets.inactive.bg_fill = SURFACE_2;
+    v.widgets.inactive.weak_bg_fill = SURFACE_2;
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, LINE_2);
+    v.widgets.hovered.bg_fill = SURFACE_2;
+    v.widgets.hovered.weak_bg_fill = SURFACE_2;
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, SIGNAL_B);
+    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, SIGNAL_B);
+
+    gaya.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    gaya.spacing.button_padding = egui::vec2(10.0, 6.0);
+    gaya.spacing.interact_size.y = 28.0;
+
+    ctx.set_style(gaya);
+}
+
+/// Tombol mata untuk menampilkan atau menyembunyikan kata sandi.
+///
+/// Digambar, bukan diambil dari font. Emoji tidak selalu tersedia pada font
+/// bawaan, dan ikon yang kadang berubah menjadi kotak kosong lebih buruk
+/// daripada tidak ada ikon sama sekali.
+fn tombol_mata(ui: &mut egui::Ui, terlihat: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 28.0), egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let warna = if resp.hovered() { INK } else { INK_3 };
+        let garis = egui::Stroke::new(1.3, warna);
+        let p = ui.painter();
+        let c = rect.center();
+        let (w, h) = (8.5, 4.8);
+
+        // Kelopak atas dan bawah, masing-masing satu busur parabola.
+        let busur = |arah: f32| -> Vec<egui::Pos2> {
+            (0..=14)
+                .map(|i| {
+                    let t = i as f32 / 14.0;
+                    let x = -w + 2.0 * w * t;
+                    let y = arah * h * (1.0 - (x / w).powi(2));
+                    c + egui::vec2(x, y)
+                })
+                .collect()
+        };
+        p.add(egui::Shape::line(busur(-1.0), garis));
+        p.add(egui::Shape::line(busur(1.0), garis));
+        p.circle_stroke(c, 2.1, garis);
+
+        if !terlihat {
+            p.line_segment(
+                [c + egui::vec2(-8.5, 6.0), c + egui::vec2(8.5, -6.0)],
+                garis,
+            );
+        }
+    }
+
+    resp.on_hover_text(if terlihat { "Sembunyikan" } else { "Tampilkan" })
+}
+
 /// Keadaan yang dibagi antara agent dan jendela.
 #[derive(Debug, Default)]
 pub struct Bersama {
@@ -52,6 +151,14 @@ pub struct Aplikasi {
 
     alias_diketik: String,
     sandi_tetap_diketik: String,
+    /// Kata sandi tetap terlihat atau tersamar.
+    ///
+    /// Kata sandi yang mesin yang pilih dapat disembunyikan tanpa biaya — ia
+    /// akan disalin, bukan diketik ulang. Yang **diketik manusia** justru
+    /// harus dapat dilihat: mengetik sepuluh karakter tanpa umpan balik lalu
+    /// mendapati diri terkunci adalah kegagalan yang sepenuhnya dapat dihindari.
+    tetap_terlihat: bool,
+    sesi_terlihat: bool,
     galat: Option<String>,
 }
 
@@ -83,6 +190,8 @@ impl Aplikasi {
             konfig,
             alias_diketik: String::new(),
             sandi_tetap_diketik: String::new(),
+            tetap_terlihat: false,
+            sesi_terlihat: false,
             galat: None,
         }
     }
@@ -117,7 +226,9 @@ impl eframe::App for Aplikasi {
             return;
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| self.gambar_utama(ui));
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| self.gambar_utama(ui));
+        });
     }
 }
 
@@ -179,6 +290,23 @@ impl Aplikasi {
         }
     }
 
+    /// Judul bagian: huruf kecil, renggang, redup — sama seperti di web.
+    fn label_bagian(ui: &mut egui::Ui, teks: &str) {
+        ui.add_space(RUANG_BAGIAN);
+        ui.label(
+            egui::RichText::new(teks.to_uppercase())
+                .size(10.0)
+                .monospace()
+                .color(INK_3),
+        );
+        ui.add_space(4.0);
+    }
+
+    fn keterangan(ui: &mut egui::Ui, teks: &str) {
+        ui.add_space(3.0);
+        ui.label(egui::RichText::new(teks).size(11.0).color(INK_3));
+    }
+
     fn gambar_utama(&mut self, ui: &mut egui::Ui) {
         let (tersambung, sesi, diri, sandi_baru) = {
             let b = self.bersama.lock().ok();
@@ -200,108 +328,163 @@ impl Aplikasi {
             }
         };
 
-        ui.add_space(8.0);
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            ui.heading("AetherDesk");
+            ui.label(
+                egui::RichText::new("AetherDesk")
+                    .size(19.0)
+                    .monospace()
+                    .strong()
+                    .color(INK),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Warna saja tidak cukup: bentuk titiknya ikut membedakan,
+                // sehingga terbaca oleh mata yang tidak membedakan warna.
                 let (warna, teks) = match (&sesi, tersambung) {
-                    (Some(_), _) => (egui::Color32::from_rgb(90, 190, 120), "sedang dilihat"),
-                    (None, true) => (egui::Color32::from_rgb(90, 160, 220), "siap"),
-                    (None, false) => (egui::Color32::from_rgb(200, 100, 100), "terputus"),
+                    (Some(_), _) => (WARN, "● SEDANG DILIHAT"),
+                    (None, true) => (OK, "● SIAP"),
+                    (None, false) => (BAD, "○ TERPUTUS"),
                 };
-                ui.colored_label(warna, format!("● {teks}"));
+                ui.label(egui::RichText::new(teks).size(10.0).monospace().color(warna));
             });
         });
+        if let Some(e) = &sesi {
+            ui.label(egui::RichText::new(format!("Dilihat oleh {e}")).size(11.0).color(WARN));
+        }
+        ui.add_space(8.0);
         ui.separator();
-        ui.add_space(6.0);
 
         let Some((nomor, handle, org, punya_tetap)) = diri else {
+            ui.add_space(RUANG_BAGIAN);
             ui.label("Memuat identitas dari server…");
             if let Some(g) = &self.galat {
-                ui.colored_label(egui::Color32::from_rgb(220, 120, 120), g);
+                ui.colored_label(BAD, g);
             }
             return;
         };
 
-        // ── Identitas ───────────────────────────────────────────────────────
-        ui.label(egui::RichText::new("Nomor perangkat").small());
+        // ── Nomor perangkat ─────────────────────────────────────────────────
+        Self::label_bagian(ui, "Nomor perangkat");
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(&nomor).size(26.0).monospace().strong());
-            if ui.button("Salin").clicked() {
-                let bersih: String = nomor.chars().filter(|c| c.is_ascii_digit()).collect();
-                self.salin(&bersih);
-            }
+            ui.label(
+                egui::RichText::new(&nomor)
+                    .size(30.0)
+                    .monospace()
+                    .strong()
+                    .color(INK),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Salin").clicked() {
+                    let bersih: String = nomor.chars().filter(|c| c.is_ascii_digit()).collect();
+                    self.salin(&bersih);
+                }
+            });
         });
-        ui.small(format!("Organisasi {org}"));
-        ui.add_space(10.0);
+        Self::keterangan(ui, &format!("Organisasi {org}"));
 
         // ── Alias ───────────────────────────────────────────────────────────
-        ui.label(egui::RichText::new("Alias").small());
-        ui.horizontal(|ui| {
-            if self.alias_diketik.is_empty() {
-                if let Some(h) = &handle {
-                    self.alias_diketik = h.clone();
-                }
+        Self::label_bagian(ui, "Alias");
+        if self.alias_diketik.is_empty() {
+            if let Some(h) = &handle {
+                self.alias_diketik = h.clone();
             }
-            ui.text_edit_singleline(&mut self.alias_diketik);
+        }
+        ui.horizontal(|ui| {
+            let sisa = ui.available_width() - 78.0;
+            ui.add_sized(
+                [sisa.max(120.0), 28.0],
+                egui::TextEdit::singleline(&mut self.alias_diketik)
+                    .hint_text("mis. pc-kantor"),
+            );
             if ui.button("Simpan").clicked() {
                 let _ = self
                     .perintah
                     .send(Perintah::SetAlias(self.alias_diketik.trim().to_string()));
             }
         });
-        ui.small("Huruf kecil, angka, tanda hubung. Dapat dipakai menggantikan nomor.");
-        ui.add_space(10.0);
+        Self::keterangan(ui, "Huruf kecil, angka, tanda hubung. Menggantikan nomor.");
 
-        // ── Kata sandi ──────────────────────────────────────────────────────
-        ui.label(egui::RichText::new("Kata sandi sesi").small());
+        // ── Kata sandi sesi ─────────────────────────────────────────────────
+        Self::label_bagian(ui, "Kata sandi sesi");
         ui.horizontal(|ui| {
             match &sandi_baru {
                 Some(p) => {
-                    ui.label(egui::RichText::new(p).size(20.0).monospace().strong());
+                    let tampil = if self.sesi_terlihat {
+                        p.clone()
+                    } else {
+                        "•".repeat(p.chars().count())
+                    };
+                    ui.label(
+                        egui::RichText::new(tampil)
+                            .size(21.0)
+                            .monospace()
+                            .strong()
+                            .color(INK),
+                    );
+                    if tombol_mata(ui, self.sesi_terlihat).clicked() {
+                        self.sesi_terlihat = !self.sesi_terlihat;
+                    }
                     let p = p.clone();
                     if ui.button("Salin").clicked() {
                         self.salin(&p);
                     }
                 }
                 None => {
-                    ui.label(egui::RichText::new("••••••••").size(20.0).monospace());
+                    ui.label(
+                        egui::RichText::new("— belum dibangkitkan")
+                            .size(13.0)
+                            .color(INK_3),
+                    );
                 }
             }
-            if ui.button("Ganti").clicked() {
-                let _ = self.perintah.send(Perintah::RotasiSandiSesi);
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Ganti").clicked() {
+                    self.sesi_terlihat = true;
+                    let _ = self.perintah.send(Perintah::RotasiSandiSesi);
+                }
+            });
         });
-        ui.small("Berotasi setiap kali diganti; hanya terlihat sekali.");
-        ui.add_space(10.0);
+        Self::keterangan(ui, "Berotasi setiap diganti, dan hanya terlihat sekali.");
 
-        ui.label(egui::RichText::new("Kata sandi tetap").small());
+        // ── Kata sandi tetap ────────────────────────────────────────────────
+        Self::label_bagian(ui, "Kata sandi tetap");
         ui.horizontal(|ui| {
-            ui.add(
+            let sisa = ui.available_width() - (if punya_tetap { 152.0 } else { 108.0 });
+            ui.add_sized(
+                [sisa.max(110.0), 28.0],
                 egui::TextEdit::singleline(&mut self.sandi_tetap_diketik)
-                    .password(true)
+                    // Yang diketik manusia harus dapat dilihat. Mengetik
+                    // sepuluh karakter tanpa umpan balik lalu mendapati diri
+                    // terkunci adalah kegagalan yang dapat dihindari.
+                    .password(!self.tetap_terlihat)
                     .hint_text("minimal 10 karakter"),
             );
+            if tombol_mata(ui, self.tetap_terlihat).clicked() {
+                self.tetap_terlihat = !self.tetap_terlihat;
+            }
             if ui.button("Pasang").clicked() {
                 let s = self.sandi_tetap_diketik.clone();
                 self.sandi_tetap_diketik.clear();
+                self.tetap_terlihat = false;
                 let _ = self.perintah.send(Perintah::SetSandiTetap(s));
             }
             if punya_tetap && ui.button("Hapus").clicked() {
                 let _ = self.perintah.send(Perintah::HapusSandiTetap);
             }
         });
-        ui.small(if punya_tetap {
-            "Aktif. Tidak berotasi — siapa pun yang tahu dapat masuk sampai diganti."
-        } else {
-            "Belum aktif. Hanya kata sandi sesi yang berlaku."
-        });
+        Self::keterangan(
+            ui,
+            if punya_tetap {
+                "Aktif. Tidak berotasi — siapa pun yang tahu dapat masuk sampai diganti."
+            } else {
+                "Belum aktif. Hanya kata sandi sesi yang berlaku."
+            },
+        );
 
         // ── Daftar kepercayaan ──────────────────────────────────────────────
-        ui.add_space(12.0);
+        ui.add_space(RUANG_BAGIAN);
         ui.separator();
-        ui.add_space(6.0);
-        ui.label(egui::RichText::new("Diizinkan mengakses mesin ini").small());
+        Self::label_bagian(ui, "Diizinkan mengakses mesin ini");
 
         let entri: Vec<(Uuid, String, String)> = self
             .daftar
@@ -323,11 +506,11 @@ impl Aplikasi {
             .unwrap_or_default();
 
         if entri.is_empty() {
-            ui.small("Belum ada. Setiap permintaan akan ditanyakan lebih dulu.");
+            Self::keterangan(ui, "Belum ada. Setiap permintaan akan ditanyakan lebih dulu.");
         } else {
             for (id, email, terakhir) in entri {
                 ui.horizontal(|ui| {
-                    ui.label(&email);
+                    ui.label(egui::RichText::new(&email).size(12.0).color(INK_2));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("Cabut").clicked() {
                             if let Ok(mut d) = self.daftar.lock() {
@@ -335,7 +518,7 @@ impl Aplikasi {
                                 let _ = d.simpan();
                             }
                         }
-                        ui.small(&terakhir);
+                        ui.label(egui::RichText::new(&terakhir).size(10.0).color(INK_3));
                     });
                 });
             }
@@ -343,15 +526,19 @@ impl Aplikasi {
 
         if let Some(g) = &self.galat {
             ui.add_space(8.0);
-            ui.colored_label(egui::Color32::from_rgb(220, 120, 120), g);
+            ui.colored_label(BAD, egui::RichText::new(g).size(11.0));
         }
         if let Some(p) = self.bersama.lock().ok().and_then(|b| b.pesan.clone()) {
             ui.add_space(8.0);
-            ui.colored_label(egui::Color32::from_rgb(150, 190, 150), p);
+            ui.colored_label(OK, egui::RichText::new(p).size(11.0));
         }
 
-        ui.add_space(10.0);
-        ui.small(format!("Server {}", self.konfig.server));
+        ui.add_space(RUANG_BAGIAN);
+        ui.label(
+            egui::RichText::new(format!("Server {}", self.konfig.server))
+                .size(10.0)
+                .color(INK_3),
+        );
     }
 }
 

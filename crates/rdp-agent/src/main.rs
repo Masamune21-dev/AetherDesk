@@ -682,7 +682,10 @@ fn perintah_gui(argumen: &[String]) -> Result<()> {
     eframe::run_native(
         "AetherDesk",
         opsi_jendela,
-        Box::new(move |_cc| Ok(Box::new(aplikasi))),
+        Box::new(move |cc| {
+            gui::atur_gaya(&cc.egui_ctx);
+            Ok(Box::new(aplikasi))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("gagal membuka jendela: {e}"))
 }

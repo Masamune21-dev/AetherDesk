@@ -5,35 +5,129 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>AetherDesk</title>
-<link rel="stylesheet" href="/style.css?v=10">
+<link rel="stylesheet" href="/style.css?v=11">
 </head>
 <body>
 <div class="wrap">
-  <header class="hero">
-    <span class="eyebrow">Fase 0 · Control Plane</span>
+  <header class="hero-utama">
+    <span class="eyebrow">Remote desktop · zero-trust · terenkripsi</span>
     <h1>Layar Anda, <em>menyeberangi jarak</em></h1>
-    <p>Bagikan layar dari satu browser dan sambungkan dari browser lain.
-       Tanpa memasang apa pun, tanpa membuka satu port pun di jaringan Anda.</p>
+    <p class="pengantar">Sambungkan ke komputer mana pun lewat Device ID dan
+       kata sandi sekali pakai. Tanpa membuka satu port pun di jaringan Anda,
+       dan tanpa perantara yang pernah melihat isi layarnya.</p>
+
+    <div class="hero-aksi">
+      <a class="tombol-tautan" href="/setup">Buat organisasi</a>
+      <a class="tombol-tautan sekunder" href="/panduan">Panduan penggunaan</a>
+    </div>
+
+    <!-- Dua ujung koneksi dan lintasan di antaranya. Gradien sinyal muncul di
+         sini karena inilah satu-satunya gambar yang memang membicarakannya. -->
+    <svg class="jalur-diagram" viewBox="0 0 320 76" role="img"
+         aria-label="Perangkat sumber tersambung ke perangkat penonton melalui relay terenkripsi">
+      <defs>
+        <!-- `userSpaceOnUse`, bukan bakunya. Gradien yang mengacu pada kotak
+             pembatas merosot pada garis horizontal — tinggi kotaknya nol,
+             sehingga garisnya hilang sama sekali tanpa satu pun galat. -->
+        <linearGradient id="lintasan" gradientUnits="userSpaceOnUse"
+                        x1="64" y1="0" x2="256" y2="0">
+          <stop offset="0%"   stop-color="#8b7bf7"/>
+          <stop offset="50%"  stop-color="#4cc9f0"/>
+          <stop offset="100%" stop-color="#f4a261"/>
+        </linearGradient>
+      </defs>
+
+      <path d="M64 38 H256" fill="none"
+            stroke="url(#lintasan)" stroke-width="1.5" stroke-dasharray="3 5" opacity="0.7"/>
+
+      <circle class="nadi" r="3" fill="#4cc9f0" style="offset-path: path('M64 38 H256')"/>
+
+      <g class="simpul-kiri">
+        <rect class="simpul" x="8" y="20" width="56" height="36" rx="5" stroke-width="1"/>
+        <path d="M18 30 H46 M18 36 H54 M18 42 H38" stroke="#8b7bf7" stroke-width="1.5"
+              stroke-linecap="round" opacity="0.55"/>
+      </g>
+      <g class="simpul-kanan">
+        <rect class="simpul" x="256" y="20" width="56" height="36" rx="5" stroke-width="1"/>
+        <path d="M266 30 H294 M266 36 H302 M266 42 H286" stroke="#f4a261" stroke-width="1.5"
+              stroke-linecap="round" opacity="0.55"/>
+      </g>
+
+      <text class="label" x="36"  y="70" text-anchor="middle">sumber</text>
+      <text class="label" x="284" y="70" text-anchor="middle">penonton</text>
+      <text class="label" x="160" y="26" text-anchor="middle">terenkripsi</text>
+    </svg>
   </header>
 
-  <section class="jalur">
-    <a class="jalur-kartu" href="/agent">
-      <span class="nomor">Ujung A · sumber</span>
-      <span class="judul">Bagikan layar</span>
-      <span class="ket">Jadikan perangkat ini yang diakses. Anda menerima
-        Device ID dan kata sandi sekali pakai untuk dibacakan.</span>
-    </a>
-    <a class="jalur-kartu" href="/viewer">
-      <span class="nomor">Ujung B · tujuan</span>
-      <span class="judul">Hubungkan</span>
-      <span class="ket">Masukkan Device ID dan kata sandi, lalu tunggu
-        persetujuan dari sisi sana.</span>
-    </a>
+  <section class="card">
+    <div class="card-head">
+      <h2>Urutan penggunaan</h2>
+    </div>
+    <!-- Nomornya bukan hiasan: melewati langkah pertama membuat dua langkah
+         berikutnya mustahil, dan itu sumber kebingungan yang paling sering. -->
+    <div class="langkah">
+      <div class="langkah-baris">
+        <div class="isi">
+          <span class="judul"><a href="/setup">Buat organisasi</a></span>
+          <span class="ket">Wajib lebih dulu. Seluruh perangkat dan pengguna
+            hidup di dalam satu organisasi, dan tanpa itu tidak ada tempat bagi
+            perangkat untuk terdaftar.</span>
+        </div>
+      </div>
+      <div class="langkah-baris">
+        <div class="isi">
+          <span class="judul"><a href="/agent">Bagikan layar</a> dari perangkat yang akan diakses</span>
+          <span class="ket">Perangkat menampilkan Device ID dan kata sandi sesi
+            untuk dibacakan. Kata sandi berganti setiap sesi berakhir, jadi
+            yang sempat bocor tidak lagi berlaku.</span>
+        </div>
+      </div>
+      <div class="langkah-baris">
+        <div class="isi">
+          <span class="judul"><a href="/viewer">Hubungkan</a> dari perangkat Anda</span>
+          <span class="ket">Masukkan Device ID dan kata sandi, lalu tunggu
+            persetujuan dari sisi sana. Permintaan tidak pernah diterima
+            diam-diam.</span>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <p class="kecil">Belum punya organisasi? <a href="/setup">Buat yang pertama</a>.
-     Kata sandi sesi berganti setiap kali sesi berakhir, jadi yang sempat bocor
-     tidak lagi berlaku.</p>
+  <section class="card">
+    <div class="card-head">
+      <h2>Lewat browser, atau lewat aplikasi</h2>
+    </div>
+    <p>Berbagi layar lewat browser tidak memerlukan pemasangan apa pun, tetapi
+       browser memang <strong>tidak dapat</strong> menggerakkan mouse atau
+       mengetik di luar halamannya sendiri — itu batas keamanan yang disengaja,
+       bukan kekurangan yang belum diisi.</p>
+
+    <div class="banding">
+      <div class="banding-kolom">
+        <h3>Agent browser</h3>
+        <ul class="banding-daftar">
+          <li class="ya">Tanpa pemasangan</li>
+          <li class="ya">Melihat satu layar</li>
+          <li class="tidak">Tidak dapat mengendalikan mouse</li>
+          <li class="tidak">Tidak dapat mengetik</li>
+          <li class="tidak">Tidak dapat berpindah monitor</li>
+        </ul>
+        <a class="tombol-tautan sekunder" href="/agent">Bagikan lewat browser</a>
+      </div>
+
+      <div class="banding-kolom utama">
+        <h3>Aplikasi Windows</h3>
+        <ul class="banding-daftar">
+          <li class="ya">Kendali penuh mouse dan papan ketik</li>
+          <li class="ya">Berpindah antar monitor</li>
+          <li class="ya">Alias dan kata sandi tetap</li>
+          <li class="ya">Izinkan sekali, diingat berikutnya</li>
+          <li class="ya">Tetap online setelah komputer menyala</li>
+        </ul>
+        <span class="tombol-tautan belum" aria-disabled="true">Segera — belum tersedia</span>
+      </div>
+    </div>
+  </section>
 
   <section class="card">
     <div class="card-head">
@@ -86,7 +180,7 @@
 </div>
 
 <script type="module">
-import { pasangHeader } from '/app.js?v=10';
+import { pasangHeader } from '/app.js?v=11';
 pasangHeader('/');
 
 const set = (el, kelas, teks) => { el.className = 'badge ' + kelas; el.textContent = teks; };
