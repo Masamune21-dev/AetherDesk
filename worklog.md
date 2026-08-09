@@ -981,7 +981,89 @@ ada untuk mesin tanpa layar.
 **Belum ada:** ikon tray, sehingga menutup jendela menghentikan agent. Itu dan
 installer menjadi M5d.
 
-**72. Keadaan M2**
+**73. Beranda, panduan, dan perangkat tersimpan**
+
+Beranda mendapat hero yang sesungguhnya beserta dua hal yang selama ini hilang:
+urutan yang mengikat, dan batas kemampuan browser. Yang kedua paling penting —
+orang yang mengira browser sudah cukup akan menyimpulkan produknya rusak ketika
+mouse-nya tidak bergerak.
+
+Diagram jalur sinyal adalah satu-satunya tempat gradien muncul sebagai gambar,
+dan alasannya tepat: yang digambar memang dua ujung koneksi. Gradiennya sempat
+**tidak tampak sama sekali** — `linearGradient` bakunya mengacu pada kotak
+pembatas, dan garis horizontal punya tinggi nol sehingga gradiennya merosot.
+Diperbaiki dengan `userSpaceOnUse`. Tidak ada galat apa pun di konsol.
+
+Tombol unduh aplikasi dibuat `<span>`, bukan `<a>` tanpa `href`: tautan yang
+tidak menuju ke mana-mana tetap terbaca sebagai tautan oleh pembaca layar, dan
+itu menjanjikan sesuatu yang belum ada.
+
+Halaman `/panduan` baru menuntun dari nol sampai layar muncul. Satu cacat tata
+letak ikut ketahuan dari tangkapan layar: isi kotak catatan pecah menjadi
+beberapa kolom, karena sebagai flex container setiap anak menjadi flex item —
+termasuk simpul teks telanjang dan `<strong>` di tengah kalimat. Gejalanya hanya
+muncul ketika kalimatnya kebetulan memuat penekanan.
+
+Viewer mendapat **perangkat tersimpan** berisi cuplikan layar dari sesi
+terakhir. Gambar mengenali mesin jauh lebih cepat daripada sembilan digit.
+Kata sandi **tidak** ikut disimpan: yang sesi berotasi sehingga akan basi
+sendiri, yang tetap tidak berotasi — dan menaruhnya di `localStorage` berarti
+satu komputer bersama sudah cukup untuk membocorkannya. Mengklik kartu mengisi
+formulir, bukan menyambung otomatis; sambungan yang dipicu sendiri lalu gagal
+terasa seperti kerusakan.
+
+**74. Jendela dirapikan**
+
+Token warna disalin dari sistem desain web, sehingga jendela dan halaman
+terbaca sebagai satu produk: label bagian huruf kecil renggang, nomor perangkat
+besar monospace, sudut 4px, lencana status yang membedakan lewat bentuk titik
+selain lewat warna.
+
+Kata sandi mendapat tombol mata, dan ikonnya **digambar** alih-alih diambil
+dari font — emoji tidak selalu tersedia pada font bawaan, dan ikon yang kadang
+berubah menjadi kotak kosong lebih buruk daripada tidak ada ikon sama sekali.
+
+Alasan tombolnya ada bukan kenyamanan: yang **diketik manusia** harus dapat
+dilihat. Mengetik sepuluh karakter tanpa umpan balik lalu mendapati diri
+terkunci dari mesin sendiri adalah kegagalan yang sepenuhnya dapat dihindari.
+
+**75. M5d — baki sistem, jalan otomatis, pemasang**
+
+Menutup jendela kini menyembunyikannya ke baki, bukan mematikan agent.
+Aplikasi remote desktop yang berhenti ketika jendelanya ditutup tidak dapat
+diandalkan untuk hal yang justru menjadi tugasnya — dan orang menutup jendela
+karena selesai membacanya, bukan karena ingin memutus akses. Tombol **Keluar**
+di kaki jendela adalah satu-satunya jalan benar-benar berhenti.
+
+Ikon bakinya digambar dalam kode, bukan dimuat dari `.ico`. Berkas terpisah
+adalah satu hal lagi yang dapat hilang saat program disalin ke mesin lain, dan
+aplikasi ini memang dirancang untuk disalin. Windows menaruh ikon baru di area
+luapan secara baku; itu perilaku sistem, bukan kegagalan.
+
+**Jalan otomatis memakai kunci `Run` milik pengguna**, bukan milik mesin. Kunci
+per-mesin menuntut hak administrator dan menjalankan agent untuk **setiap**
+orang yang masuk ke komputer itu — termasuk yang tidak pernah menyetujui apa
+pun. Agent menangkap layar sesi interaktif; ia berhak hidup hanya di sesi orang
+yang memasangnya. Jalan yang benar untuk mesin bersama adalah service
+LocalSystem lewat `WTSQueryUserToken`, dan itu tetap ADR-010.
+
+Terverifikasi langsung terhadap registri, termasuk pengutipan path — path
+berspasi tanpa tanda kutip ditafsirkan sebagai beberapa argumen, dan agent
+tidak pernah menyala tanpa satu pun pesan.
+
+`scripts/pasang-windows.ps1` memasang per pengguna tanpa hak administrator,
+membuat pintasan menu Start, dan opsional mendaftarkan jalan otomatis.
+Pencopotan sengaja **tidak** menghapus identitas perangkat dan daftar
+kepercayaan — memasang ulang lalu mendapati mesin masih dikenal jauh lebih
+berguna — tetapi lokasinya disebutkan agar yang ingin bersih dapat
+menghapusnya sendiri.
+
+**Belum ada:** installer sungguhan beserta tanda tangan kode. Sejak Juni 2023
+sertifikat code signing mewajibkan kunci privat di perangkat keras
+bersertifikasi FIPS, bukan berkas PFX. Sampai itu diurus, SmartScreen akan
+memperingatkan setiap orang yang memasang — temuan T-18.
+
+**76. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

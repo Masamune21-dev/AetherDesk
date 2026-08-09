@@ -62,4 +62,18 @@ windows = { version = "0.58", features = [
     "Win32_System_Com",
     # Injeksi input — SendInput.
     "Win32_UI_Input_KeyboardAndMouse",
+    # Jalan otomatis saat masuk — registri Run.
+    "Win32_System_Registry",
 ] }
+
+# Ikon baki sistem. Tanpa ini, menutup jendela berarti mematikan agent — dan
+# aplikasi remote desktop yang berhenti ketika jendelanya ditutup tidak dapat
+# diandalkan untuk hal yang justru menjadi tugasnya.
+#
+# Ditaruh di akhir berkas dengan sengaja: tabel `[target...]` yang disisipkan
+# di tengah `[dependencies]` akan menyerap seluruh baris setelahnya, dan
+# gejalanya adalah puluhan galat "unresolved import" yang tidak menyebut
+# Cargo.toml sama sekali.
+[target.'cfg(windows)'.dependencies.tray-icon]
+version = "0.19"
+default-features = false

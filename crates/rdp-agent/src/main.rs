@@ -21,6 +21,7 @@ mod input;
 mod dipercaya;
 mod gui;
 mod monitor;
+mod otomatis;
 mod persetujuan;
 mod rtc;
 mod signal;
@@ -43,6 +44,7 @@ fn main() -> Result<()> {
         "gui" => perintah_gui(&argumen[1..]),
         "status" => perintah_status(),
         "tepercaya" => perintah_tepercaya(&argumen[1..]),
+        "autostart" => perintah_autostart(&argumen[1..]),
         "alias" => jalankan_async(perintah_alias(&argumen[1..])),
         "sandi" => jalankan_async(perintah_sandi(&argumen[1..])),
         "--help" | "-h" | "help" => {
@@ -84,7 +86,12 @@ PERINTAH
   alias <NAMA>           Memberi alias yang mudah diingat (kosongkan: hapus)
   sandi                  Mengubah kata sandi sesi atau kata sandi tetap
   tepercaya              Melihat siapa yang pernah diizinkan mengakses mesin ini
+  autostart              Menjalankan agent otomatis saat masuk ke Windows
   help                   Menampilkan bantuan ini
+
+OPSI autostart
+  --pasang [OPSI…]       Pasang; opsi di belakangnya diteruskan ke `gui`
+  --hapus                Batalkan
 
 OPSI tepercaya
   --cabut <EMAIL>        Mencabut satu orang
@@ -612,6 +619,59 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
     }
 
     signal::jalankan(konfig, kunci, atur, penjaga, None).await
+}
+
+// ── autostart ────────────────────────────────────────────────────────────────
+
+fn perintah_autostart(argumen: &[String]) -> Result<()> {
+    if argumen.iter().any(|a| a == "--hapus") {
+        return match otomatis::hapus()? {
+            true => {
+                println!("\nAgent tidak lagi berjalan otomatis saat Anda masuk.");
+                Ok(())
+            }
+            false => {
+                println!("\nMemang belum terpasang. Tidak ada yang diubah.");
+                Ok(())
+            }
+        };
+    }
+
+    if argumen.iter().any(|a| a == "--pasang") {
+        // Argumen di belakang `--pasang` ikut diteruskan, sehingga
+        // `autostart --pasang --izinkan-kendali --fps 60` menghasilkan agent
+        // yang menyala dengan setelan yang sama persis.
+        let teruskan: Vec<String> = argumen
+            .iter()
+            .filter(|a| *a != "--pasang")
+            .cloned()
+            .collect();
+        let p = otomatis::pasang(&teruskan)?;
+        println!("\nAgent akan berjalan saat Anda masuk ke Windows.\n");
+        println!("  {p}\n");
+        println!(
+            "Terpasang untuk akun Anda saja, bukan untuk seluruh pengguna\n\
+             komputer ini. Agent menangkap layar sesi interaktif, jadi ia\n\
+             hanya pantas hidup di sesi orang yang memang memasangnya."
+        );
+        return Ok(());
+    }
+
+    match otomatis::terpasang() {
+        Some(p) => {
+            println!("\nBerjalan otomatis saat masuk:\n");
+            println!("  {p}\n");
+            println!("Hapus dengan: rdp-agent autostart --hapus");
+        }
+        None => {
+            println!(
+                "\nTidak berjalan otomatis.\n\n\
+                 Pasang dengan:\n  \
+                 rdp-agent autostart --pasang --izinkan-kendali"
+            );
+        }
+    }
+    Ok(())
 }
 
 // ── gui ──────────────────────────────────────────────────────────────────────

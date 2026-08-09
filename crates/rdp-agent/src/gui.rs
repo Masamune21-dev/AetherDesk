@@ -86,6 +86,68 @@ pub fn atur_gaya(ctx: &egui::Context) {
     ctx.set_style(gaya);
 }
 
+/// Membuat ikon baki sistem: satu titik sumber dengan muka gelombang yang
+/// memancar — tanda yang sama dengan yang dipakai di web.
+///
+/// Digambar dalam kode alih-alih dimuat dari berkas `.ico`. Ikon yang hidup
+/// sebagai berkas terpisah adalah satu hal lagi yang dapat hilang saat program
+/// disalin ke mesin lain, dan aplikasi ini memang dirancang untuk disalin.
+#[cfg(windows)]
+fn ikon_baki() -> Option<tray_icon::Icon> {
+    const N: i32 = 32;
+    let mut piksel = vec![0u8; (N * N * 4) as usize];
+
+    // Titik sumber di pojok kiri-bawah, tiga busur sepusat yang meredup.
+    let sumber = (6.0_f32, 26.0_f32);
+    for y in 0..N {
+        for x in 0..N {
+            let (dx, dy) = (x as f32 - sumber.0, y as f32 - sumber.1);
+            let jarak = (dx * dx + dy * dy).sqrt();
+
+            // Hanya kuadran kanan-atas: gelombang merambat menjauhi sudutnya.
+            let (nyala, alfa) = if jarak < 2.6 {
+                (true, 1.0)
+            } else if dx >= -1.0 && dy <= 1.0 {
+                let dekat = [9.0_f32, 16.0, 23.0]
+                    .iter()
+                    .map(|r| ((jarak - r).abs(), *r))
+                    .fold((f32::MAX, 0.0), |a, b| if b.0 < a.0 { b } else { a });
+                // Busur setebal ~1,6 piksel, memudar makin jauh dari sumber.
+                (dekat.0 < 1.6, (1.0 - dekat.1 / 30.0).clamp(0.25, 1.0))
+            } else {
+                (false, 0.0)
+            };
+
+            if nyala {
+                // Gradien sinyal: ungu di dekat sumber, kuning di ujung.
+                let t = (jarak / 26.0).clamp(0.0, 1.0);
+                let (r, g, b) = if t < 0.5 {
+                    let u = t * 2.0;
+                    (
+                        0x8b as f32 + (0x4c as f32 - 0x8b as f32) * u,
+                        0x7b as f32 + (0xc9 as f32 - 0x7b as f32) * u,
+                        0xf7 as f32 + (0xf0 as f32 - 0xf7 as f32) * u,
+                    )
+                } else {
+                    let u = (t - 0.5) * 2.0;
+                    (
+                        0x4c as f32 + (0xf4 as f32 - 0x4c as f32) * u,
+                        0xc9 as f32 + (0xa2 as f32 - 0xc9 as f32) * u,
+                        0xf0 as f32 + (0x61 as f32 - 0xf0 as f32) * u,
+                    )
+                };
+                let i = ((y * N + x) * 4) as usize;
+                piksel[i] = r as u8;
+                piksel[i + 1] = g as u8;
+                piksel[i + 2] = b as u8;
+                piksel[i + 3] = (alfa * 255.0) as u8;
+            }
+        }
+    }
+
+    tray_icon::Icon::from_rgba(piksel, N as u32, N as u32).ok()
+}
+
 /// Tombol mata untuk menampilkan atau menyembunyikan kata sandi.
 ///
 /// Digambar, bukan diambil dari font. Emoji tidak selalu tersedia pada font
@@ -149,6 +211,15 @@ pub struct Aplikasi {
     perintah: tokio::sync::mpsc::UnboundedSender<Perintah>,
     konfig: Konfigurasi,
 
+    /// Ikon baki. Dipegang hanya agar tetap hidup — melepasnya menghapus
+    /// ikonnya dari baki sistem.
+    #[cfg(windows)]
+    _baki: Option<tray_icon::TrayIcon>,
+    /// Jendela tersembunyi ke baki, bukan tertutup.
+    tersembunyi: bool,
+    /// Benar-benar keluar, bukan sekadar menyembunyikan.
+    keluar: bool,
+
     alias_diketik: String,
     sandi_tetap_diketik: String,
     /// Kata sandi tetap terlihat atau tersamar.
@@ -188,6 +259,17 @@ impl Aplikasi {
             terima_izin,
             perintah,
             konfig,
+            #[cfg(windows)]
+            _baki: ikon_baki().and_then(|i| {
+                tray_icon::TrayIconBuilder::new()
+                    .with_icon(i)
+                    .with_tooltip("AetherDesk")
+                    .build()
+                    .ok()
+            }),
+            tersembunyi: false,
+            keluar: false,
+
             alias_diketik: String::new(),
             sandi_tetap_diketik: String::new(),
             tetap_terlihat: false,
@@ -207,8 +289,37 @@ impl Aplikasi {
 impl eframe::App for Aplikasi {
     fn update(&mut self, ctx: &egui::Context, _f: &mut eframe::Frame) {
         // Jendela harus tetap hidup meski tidak ada peristiwa masukan: status
-        // koneksi dan permintaan persetujuan datang dari thread lain.
-        ctx.request_repaint_after(std::time::Duration::from_millis(400));
+        // koneksi dan permintaan persetujuan datang dari thread lain. Saat
+        // tersembunyi, denyutnya diperlambat — tidak ada yang melihatnya, dan
+        // yang perlu dijaga hanyalah kemampuan menerima klik dari baki.
+        ctx.request_repaint_after(std::time::Duration::from_millis(
+            if self.tersembunyi { 250 } else { 400 },
+        ));
+
+        // ── Baki sistem ─────────────────────────────────────────────────────
+        #[cfg(windows)]
+        while let Ok(peristiwa) = tray_icon::TrayIconEvent::receiver().try_recv() {
+            if matches!(
+                peristiwa,
+                tray_icon::TrayIconEvent::Click { .. } | tray_icon::TrayIconEvent::DoubleClick { .. }
+            ) {
+                self.tersembunyi = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+        }
+
+        // Menutup jendela menyembunyikannya, bukan mematikan agent. Aplikasi
+        // remote desktop yang berhenti ketika jendelanya ditutup tidak dapat
+        // diandalkan untuk hal yang justru menjadi tugasnya — dan pengguna
+        // menutup jendela karena selesai membacanya, bukan karena ingin
+        // memutus akses.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.keluar {
+            self.tersembunyi = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
 
         if self.menunggu.is_none() {
             if let Ok(p) = self.terima_izin.try_recv() {
@@ -533,11 +644,36 @@ impl Aplikasi {
             ui.colored_label(OK, egui::RichText::new(p).size(11.0));
         }
 
+        // ── Kaki ────────────────────────────────────────────────────────────
         ui.add_space(RUANG_BAGIAN);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("Server {}", self.konfig.server))
+                    .size(10.0)
+                    .color(INK_3),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Satu-satunya jalan benar-benar berhenti. Tanpa tombol ini,
+                // menutup jendela hanya menyembunyikannya dan tidak ada cara
+                // mematikan agent selain lewat pengelola tugas.
+                if ui.button("Keluar").on_hover_text(
+                    "Menghentikan agent. Perangkat menjadi offline dan tidak dapat diakses.",
+                ).clicked()
+                {
+                    self.keluar = true;
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+        });
+        ui.add_space(2.0);
         ui.label(
-            egui::RichText::new(format!("Server {}", self.konfig.server))
-                .size(10.0)
-                .color(INK_3),
+            egui::RichText::new(
+                "Menutup jendela hanya menyembunyikannya ke baki. Agent tetap berjalan.",
+            )
+            .size(10.0)
+            .color(INK_3),
         );
     }
 }
