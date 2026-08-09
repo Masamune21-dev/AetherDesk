@@ -925,6 +925,86 @@ a:focus-visible { outline: 2px solid var(--signal-b); outline-offset: 3px; borde
 .banding-daftar li.tidak::before { content: "−"; color: var(--ink-3); }
 .banding-daftar li.tidak { color: var(--ink-3); }
 
+/* ── Perangkat tersimpan ─────────────────────────────────────────────────
+   Kartu berisi cuplikan layar dari sesi terakhir. Gambar mengenali mesin jauh
+   lebih cepat daripada sembilan digit — orang mengingat tampilan desktopnya,
+   bukan nomornya. */
+
+.perangkat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--s3);
+}
+
+.perangkat-kartu {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.perangkat-kartu:hover { border-color: var(--line-lit); background: var(--surface-2); }
+.perangkat-kartu:focus-visible { outline: 2px solid var(--signal-b); outline-offset: 2px; }
+
+.perangkat-thumb {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  object-fit: cover;
+  background: var(--void);
+  border-bottom: 1px solid var(--line);
+  display: block;
+}
+
+/* Perangkat yang tersimpan sebelum sempat ada cuplikan. Pola miring lebih baik
+   daripada kotak kosong: ia menyatakan "belum ada gambar", bukan "gambarnya
+   gagal dimuat". */
+.perangkat-thumb.kosong {
+  background:
+    repeating-linear-gradient(135deg,
+      var(--surface-2) 0 6px, var(--void) 6px 12px);
+}
+
+.perangkat-isi { display: flex; flex-direction: column; gap: 2px; padding: var(--s3); }
+
+.perangkat-isi .id {
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+.perangkat-isi .waktu { font-size: var(--t-2xs); color: var(--ink-3); }
+
+.perangkat-hapus {
+  position: absolute;
+  top: var(--s2);
+  right: var(--s2);
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--void) 78%, transparent);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.perangkat-kartu:hover .perangkat-hapus,
+.perangkat-hapus:focus-visible { opacity: 1; }
+.perangkat-hapus:hover { color: var(--bad); border-color: var(--bad); background: var(--void); }
+
 /* ── Panduan ─────────────────────────────────────────────────────────────── */
 
 .panduan-isi { display: flex; flex-direction: column; gap: var(--s4); }

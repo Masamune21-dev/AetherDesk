@@ -50,6 +50,17 @@
     <p class="status" id="statusConnect"></p>
   </section>
 
+  <!-- Perangkat tersimpan. Tersembunyi sampai ada isinya — bagian kosong yang
+       selalu tampil hanya menambah beban baca tanpa memberi apa pun. -->
+  <section class="card sempit" id="kartuTersimpan" hidden>
+    <div class="card-head">
+      <h2>Perangkat tersimpan</h2>
+    </div>
+    <div class="perangkat-grid" id="gridPerangkat"></div>
+    <p class="kecil">Kata sandi <strong>tidak</strong> ikut disimpan. Yang
+       tersimpan hanya nomor, cuplikan layar, dan waktu terakhir dipakai.</p>
+  </section>
+
   <!-- ── Sesi ─────────────────────────────────────────────────────────────── -->
   <section class="card" id="kartuSesi" hidden>
     <div class="card-head">
@@ -76,6 +87,7 @@
     </div>
 
     <div class="baris rapat">
+      <button id="btnSimpanPerangkat" class="sekunder">Simpan perangkat</button>
       <button id="btnLayarPenuh" class="sekunder">Layar penuh</button>
       <button id="btnHud" class="sekunder">Sembunyikan statistik</button>
       <button id="btnPutus" class="bahaya">Akhiri sesi</button>
@@ -97,6 +109,145 @@ let signal = null;
 let kanal = null;
 let kontrol = null;
 let bolehKendali = false;
+
+/* ── Perangkat tersimpan ─────────────────────────────────────────────────
+ *
+ * Kata sandi **tidak** ikut disimpan, dan itu keputusan, bukan kelalaian.
+ * Kata sandi sesi berotasi sehingga yang tersimpan akan basi sendiri; kata
+ * sandi tetap tidak berotasi, dan menaruhnya di localStorage berarti satu
+ * skrip pihak ketiga atau satu komputer bersama sudah cukup untuk
+ * membocorkannya. Yang disimpan hanya pengenal, cuplikan, dan waktu.
+ */
+const KUNCI_SIMPAN = 'aetherdesk.perangkat';
+const MAKS_TERSIMPAN = 12;
+
+function muatTersimpan() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KUNCI_SIMPAN) ?? '[]');
+    return Array.isArray(d) ? d : [];
+  } catch {
+    // Penyimpanan rusak diperlakukan sebagai kosong. Menolak berjalan karena
+    // daftar riwayat tidak terbaca akan menghalangi hal yang sebenarnya
+    // penting: menyambung.
+    return [];
+  }
+}
+
+function tulisTersimpan(daftar) {
+  try {
+    localStorage.setItem(KUNCI_SIMPAN, JSON.stringify(daftar.slice(0, MAKS_TERSIMPAN)));
+  } catch (e) {
+    // Kuota habis, biasanya karena cuplikan menumpuk. Yang terbaru dibuang
+    // lebih baik daripada gagal diam-diam.
+    console.warn('gagal menyimpan perangkat', e);
+  }
+}
+
+/** Mengambil cuplikan dari video yang sedang berjalan. */
+function ambilCuplikan(video) {
+  if (!video?.videoWidth) return null;
+  const lebar = 320;
+  const kanvas = document.createElement('canvas');
+  kanvas.width = lebar;
+  kanvas.height = Math.round((lebar * video.videoHeight) / video.videoWidth);
+  kanvas.getContext('2d').drawImage(video, 0, 0, kanvas.width, kanvas.height);
+  // JPEG mutu sedang: cukup untuk dikenali, cukup kecil agar dua belas
+  // perangkat tetap muat di dalam kuota localStorage.
+  return kanvas.toDataURL('image/jpeg', 0.55);
+}
+
+function rapikanId(kunci) {
+  const digit = kunci.replace(/\D/g, '');
+  return digit.length === 9 ? digit.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : kunci;
+}
+
+function waktuRelatif(ms) {
+  const detik = Math.round((Date.now() - ms) / 1000);
+  if (detik < 90) return 'baru saja';
+  const menit = Math.round(detik / 60);
+  if (menit < 60) return `${menit} menit lalu`;
+  const jam = Math.round(menit / 60);
+  if (jam < 24) return `${jam} jam lalu`;
+  return new Date(ms).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+}
+
+function simpanPerangkat(kunci, video) {
+  if (!kunci) return;
+  const daftar = muatTersimpan();
+  const lama = daftar.find((p) => p.kunci === kunci);
+  const cuplikan = ambilCuplikan(video);
+
+  const entri = {
+    kunci,
+    // Cuplikan lama dipertahankan bila yang baru gagal diambil — video belum
+    // sempat memuat frame, misalnya. Gambar usang lebih berguna daripada
+    // kotak kosong.
+    thumb: cuplikan ?? lama?.thumb ?? null,
+    terakhir: Date.now(),
+  };
+
+  const sisa = daftar.filter((p) => p.kunci !== kunci);
+  tulisTersimpan([entri, ...sisa]);
+  gambarTersimpan();
+}
+
+function hapusTersimpan(kunci) {
+  tulisTersimpan(muatTersimpan().filter((p) => p.kunci !== kunci));
+  gambarTersimpan();
+}
+
+function gambarTersimpan() {
+  const daftar = muatTersimpan();
+  const grid = $('#gridPerangkat');
+  const kartu = $('#kartuTersimpan');
+  grid.textContent = '';
+  kartu.hidden = daftar.length === 0;
+
+  for (const p of daftar) {
+    const el = document.createElement('button');
+    el.className = 'perangkat-kartu';
+    el.type = 'button';
+    el.title = `Isi formulir dengan ${rapikanId(p.kunci)}`;
+
+    const gambar = document.createElement(p.thumb ? 'img' : 'div');
+    gambar.className = 'perangkat-thumb' + (p.thumb ? '' : ' kosong');
+    if (p.thumb) {
+      gambar.src = p.thumb;
+      gambar.alt = `Cuplikan layar terakhir dari ${rapikanId(p.kunci)}`;
+      gambar.loading = 'lazy';
+    }
+
+    const isi = document.createElement('div');
+    isi.className = 'perangkat-isi';
+    const id = document.createElement('span');
+    id.className = 'id';
+    id.textContent = rapikanId(p.kunci);
+    const waktu = document.createElement('span');
+    waktu.className = 'waktu';
+    waktu.textContent = waktuRelatif(p.terakhir);
+    isi.append(id, waktu);
+
+    const hapus = document.createElement('button');
+    hapus.className = 'perangkat-hapus';
+    hapus.type = 'button';
+    hapus.textContent = '×';
+    hapus.title = 'Lupakan perangkat ini';
+    hapus.setAttribute('aria-label', `Lupakan ${rapikanId(p.kunci)}`);
+    hapus.onclick = (ev) => { ev.stopPropagation(); hapusTersimpan(p.kunci); };
+
+    // Mengisi formulir, bukan langsung menyambung. Kata sandi tidak tersimpan,
+    // jadi menyambung otomatis hanya akan gagal — dan kegagalan yang dipicu
+    // sendiri oleh antarmuka terasa seperti kerusakan.
+    el.onclick = () => {
+      $('#devId').value = rapikanId(p.kunci);
+      $('#devSandi').value = '';
+      $('#devSandi').focus();
+    };
+
+    el.append(gambar, isi, hapus);
+    grid.appendChild(el);
+  }
+}
 
 /**
  * Peta `KeyboardEvent.code` ke scancode PS/2 set 1.
@@ -430,6 +581,17 @@ function mulaiHud() {
 }
 
 // ── Kontrol ──────────────────────────────────────────────────────────────────
+$('#btnSimpanPerangkat').onclick = (e) => {
+  const kunci = ($('#devId').value || '').trim();
+  if (!kunci) return;
+  simpanPerangkat(kunci, $('#layar'));
+  // Umpan balik pada tombolnya sendiri, bukan di baris status yang jauh di
+  // bawah — yang menekan tombol sedang melihat tombolnya.
+  const semula = e.target.textContent;
+  e.target.textContent = 'Tersimpan';
+  setTimeout(() => { e.target.textContent = semula; }, 1600);
+};
+
 $('#btnLayarPenuh').onclick = () => document.querySelector('.panggung').requestFullscreen?.();
 
 $('#btnHud').onclick = (e) => {
@@ -445,6 +607,15 @@ $('#btnPutus').onclick = () => {
 };
 
 function bersihkan() {
+  // Cuplikan disegarkan sebelum video dilepas, dan hanya untuk perangkat yang
+  // memang sudah tersimpan. Menyimpan otomatis setiap sesi akan mengisi daftar
+  // dengan mesin yang cuma disentuh sekali — keputusan menyimpan tetap milik
+  // pengguna.
+  const kunci = ($('#devId').value || '').trim();
+  if (kunci && muatTersimpan().some((p) => p.kunci === kunci)) {
+    simpanPerangkat(kunci, $('#layar'));
+  }
+
   clearInterval(timerHud);
   kanal?.tutup(); kanal = null;
   signal?.tutup(); signal = null;
@@ -471,6 +642,7 @@ saatSesiHabis(() => {
 });
 
 if (adaSesi()) { tampil($('#kartuMasuk'), false); tampil($('#kartuConnect'), true); }
+gambarTersimpan();
 </script>
 </body>
 </html>
