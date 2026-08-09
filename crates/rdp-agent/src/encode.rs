@@ -347,6 +347,20 @@ mod win {
 
     pub struct H264 {
         transform: IMFTransform,
+        /// Objek aktivasi yang melahirkan `transform`, disimpan **hanya** untuk
+        /// dapat mematikannya.
+        ///
+        /// `IMFActivate` menyimpan rujukan internal ke objek yang dibuatnya, dan
+        /// rujukan itu tidak ikut lepas saat `IMFActivate`-nya dilepas —
+        /// satu-satunya yang melepasnya adalah `ShutdownObject`. Tanpa itu
+        /// setiap encoder yang pernah dibuat hidup selamanya beserta seluruh
+        /// kolam buffernya.
+        ///
+        /// Ini ketahuan dari sesi produksi: setiap perpindahan monitor membuat
+        /// encoder baru, dan memori agent naik sekitar 370 MB per perpindahan
+        /// lalu mendatar — bukan bocor per frame, melainkan bocor satu encoder
+        /// utuh setiap kali.
+        aktivasi: IMFActivate,
         pub nama: String,
         pub width: u32,
         pub height: u32,
@@ -367,8 +381,20 @@ mod win {
         }
     }
 
+    impl Drop for H264 {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = self.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+                // Inilah yang benar-benar membebaskan encoder. Melepas
+                // `IMFTransform` saja tidak cukup; lihat catatan pada
+                // `aktivasi`.
+                let _ = self.aktivasi.ShutdownObject();
+            }
+        }
+    }
+
     /// Mencari MFT encoder H.264 dan menyalakannya.
-    fn cari_encoder() -> Result<(IMFTransform, String)> {
+    fn cari_encoder() -> Result<(IMFTransform, IMFActivate, String)> {
         let masuk = MFT_REGISTER_TYPE_INFO {
             guidMajorType: MFMediaType_Video,
             guidSubtype: MFVideoFormat_NV12,
@@ -429,7 +455,7 @@ mod win {
             windows::Win32::System::Com::CoTaskMemFree(Some(daftar as *const _));
         }
 
-        Ok((transform, nama))
+        Ok((transform, aktivasi, nama))
     }
 
     /// Menyusun dua u32 menjadi satu atribut UINT64, sesuai kebiasaan
@@ -441,7 +467,7 @@ mod win {
     impl H264 {
         pub fn baru(width: u32, height: u32, fps: u32, bitrate: u32) -> Result<Self> {
             mf_startup()?;
-            let (transform, nama) = cari_encoder()?;
+            let (transform, aktivasi, nama) = cari_encoder()?;
 
             // Tipe keluaran wajib ditetapkan lebih dulu. Media Foundation
             // menolak tipe masukan sebelum tahu hendak menghasilkan apa, dan
@@ -491,6 +517,7 @@ mod win {
 
             Ok(Self {
                 transform,
+                aktivasi,
                 nama,
                 width,
                 height,

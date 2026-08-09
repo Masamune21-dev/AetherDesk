@@ -238,6 +238,12 @@ fn perintah_encode(argumen: &[String]) -> Result<()> {
         .unwrap_or(8.0);
     let keluar = opsi(argumen, "--keluar").unwrap_or_else(|| "layar.h264".into());
 
+    // Uji rendam: membangun ulang capture dan encoder secara berkala, meniru
+    // apa yang terjadi setiap kali viewer berpindah monitor. Jalur itu pernah
+    // membocorkan satu encoder utuh per perpindahan, dan kebocoran seperti itu
+    // hanya terlihat bila siklusnya diulang di dalam satu proses.
+    let ganti_tiap: Option<u64> = opsi(argumen, "--ganti-tiap").and_then(|v| v.parse().ok());
+
     let mut dup = capture::Duplikasi::buka(nama.as_deref())?;
     let mut enc = encode::H264::baru(dup.width, dup.height, fps, (mbps * 1_000_000.0) as u32)?;
 
@@ -256,7 +262,36 @@ fn perintah_encode(argumen: &[String]) -> Result<()> {
     let mut terakhir: Option<capture::Frame> = None;
     let mut berikutnya = std::time::Instant::now();
 
+    // Berputar antar monitor, bukan membuka ulang yang sama. Desktop
+    // Duplication hanya mengizinkan **satu** duplikasi per output, dan yang
+    // lama baru dilepas setelah yang baru berhasil dibuat — jadi membuka ulang
+    // output yang sama pasti ditolak. Bergantian antar monitor juga persis
+    // meniru apa yang dilakukan viewer.
+    let daftar_monitor: Vec<String> = monitor::enumerasi()
+        .map(|m| m.into_iter().map(|x| x.name).collect())
+        .unwrap_or_default();
+    let mut ganti_berikutnya = ganti_tiap.map(|d| mulai + std::time::Duration::from_secs(d));
+    let mut siklus = 0usize;
+
     while mulai.elapsed() < batas {
+        if let (Some(waktu), Some(d)) = (ganti_berikutnya, ganti_tiap) {
+            if std::time::Instant::now() >= waktu && daftar_monitor.len() > 1 {
+                siklus += 1;
+                let target = &daftar_monitor[siklus % daftar_monitor.len()];
+                dup = capture::Duplikasi::buka(Some(target))?;
+                enc = encode::H264::baru(
+                    dup.width,
+                    dup.height,
+                    fps,
+                    (mbps * 1_000_000.0) as u32,
+                )?;
+                terakhir = None;
+                ganti_berikutnya =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(d));
+                println!("  siklus {siklus}: pindah ke {target} ({}×{})", dup.width, dup.height);
+            }
+        }
+
         // Frame terakhir dipertahankan dan dikirim ulang saat layar diam.
         // Tanpa itu aliran akan berhenti setiap kali tidak ada yang bergerak,
         // dan penerima tidak dapat membedakannya dari koneksi yang putus.
@@ -324,14 +359,19 @@ fn periksa_bitstream(path: &str, w: u32, h: u32) -> Result<()> {
     let mut pps = 0;
     let mut idr = 0;
     let mut lain = 0;
-    let mut dimensi = None;
+    // Seluruh dimensi yang muncul, bukan hanya yang pertama. Aliran yang
+    // berpindah monitor memuat lebih dari satu resolusi, dan melaporkan yang
+    // pertama saja membuat berkas yang sehat terlihat salah.
+    let mut dimensi: Vec<(u32, u32)> = Vec::new();
 
     for n in &nal {
         match encode::tipe_nal(n) {
             encode::NAL_SPS => {
                 sps += 1;
-                if dimensi.is_none() {
-                    dimensi = encode::baca_sps(n);
+                if let Some(d) = encode::baca_sps(n) {
+                    if !dimensi.contains(&d) {
+                        dimensi.push(d);
+                    }
                 }
             }
             encode::NAL_PPS => pps += 1,
@@ -345,14 +385,25 @@ fn periksa_bitstream(path: &str, w: u32, h: u32) -> Result<()> {
     println!("  {:<22} {}", "NAL", nal.len());
     println!("  {:<22} SPS {sps}, PPS {pps}, IDR {idr}, lain {lain}", "Jenis");
 
-    match dimensi {
-        Some((dw, dh)) if (dw, dh) == (w, h) => {
+    match dimensi.as_slice() {
+        [] => println!("  {:<22} tidak terbaca", "Dimensi dari SPS"),
+        [(dw, dh)] if (*dw, *dh) == (w, h) => {
             println!("  {:<22} {dw}×{dh} — cocok", "Dimensi dari SPS");
         }
-        Some((dw, dh)) => {
-            println!("  {:<22} {dw}×{dh} — TIDAK cocok, diminta {w}×{h}", "Dimensi dari SPS");
+        [(dw, dh)] => {
+            println!(
+                "  {:<22} {dw}×{dh} — TIDAK cocok, diminta {w}×{h}",
+                "Dimensi dari SPS"
+            );
         }
-        None => println!("  {:<22} tidak terbaca", "Dimensi dari SPS"),
+        banyak => {
+            let daftar: Vec<String> = banyak.iter().map(|(a, b)| format!("{a}×{b}")).collect();
+            println!(
+                "  {:<22} {} — aliran berpindah resolusi",
+                "Dimensi dari SPS",
+                daftar.join(", ")
+            );
+        }
     }
 
     if sps == 0 || pps == 0 || idr == 0 {

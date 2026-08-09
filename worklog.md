@@ -576,8 +576,74 @@ yang tidak aktif (NEXT_PLAN.md §5.4). Tanpa itu perpindahan tetap bekerja,
 hanya saja pengguna memilih berdasarkan ukuran dan nomor, bukan berdasarkan
 gambar kecil yang hidup.
 
-**Belum terverifikasi:** perpindahan belum pernah dicoba dari viewer sungguhan.
-Kode terpasang di produksi dan agent berjalan; ujinya menunggu manusia.
+**Terverifikasi dari viewer sungguhan.** Lima perpindahan bolak-balik,
+1920×1080 ↔ 1080×1920, seluruhnya berhasil:
+
+```
+viewer meminta pindah monitor  monitor="\\.\DISPLAY2"
+monitor berpindah  dari=\\.\DISPLAY1 ke=\\.\DISPLAY2 ukuran=1080×1920
+monitor berpindah  dari=\\.\DISPLAY2 ke=\\.\DISPLAY1 ukuran=1920×1080
+…
+```
+
+Sesi yang sama juga membuktikan perbaikan kebocoran per-frame: ia melewati
+**297 detik**, jauh di atas 185 detik tempat sesi sebelumnya mati.
+
+**54. Kebocoran kedua — satu encoder utuh per perpindahan**
+
+Sesi yang sama menunjukkan memori agent duduk di **2.262 MB**, padahal saat
+idle hanya 15 MB. Pengambilan sampel selama 30 detik menunjukkan angkanya
+**mendatar**, tidak lagi tumbuh — jadi bukan kebocoran per frame.
+
+Aritmetikanya langsung menunjuk sebabnya: satu pasang capture dan encoder
+memakai sekitar 371 MB, sesi itu berpindah monitor lima kali, dan
+6 × 371 = 2.226 MB. **Setiap perpindahan membocorkan encoder lamanya utuh.**
+
+Sebabnya `IMFActivate`. Ia menyimpan rujukan internal ke objek yang dibuatnya,
+dan rujukan itu **tidak ikut lepas** saat `IMFActivate`-nya dilepas —
+satu-satunya yang melepasnya adalah `ShutdownObject`. Tanpa itu setiap encoder
+yang pernah dibuat hidup selamanya beserta seluruh kolam buffernya.
+
+Diperbaiki dengan menyimpan `IMFActivate` di dalam `H264` dan memanggil
+`ShutdownObject` pada `Drop`.
+
+**55. Uji rendam, dan bug yang ia temukan sendiri**
+
+Kebocoran per-perpindahan tidak akan pernah terlihat pada uji frame tunggal —
+uji 45 detik sebelumnya rata di 371 MB justru karena hanya ada satu encoder.
+Karena itu `encode` diberi opsi `--ganti-tiap`, yang membangun ulang capture dan
+encoder secara berkala di dalam satu proses.
+
+Percobaan pertamanya langsung gagal, dan itu berguna:
+
+```
+Error: gagal memulai Desktop Duplication
+Caused by: The parameter is incorrect. (0x80070057)
+```
+
+Desktop Duplication hanya mengizinkan **satu duplikasi per output**, dan
+duplikasi lama baru dilepas setelah yang baru berhasil dibuat — jadi membuka
+ulang output yang sama pasti ditolak. Jalur produksi tidak terkena karena
+permintaan pindah ke monitor yang sedang aktif memang diabaikan lebih dulu,
+tetapi urutannya kini tertulis, bukan kebetulan.
+
+Uji rendam diubah menjadi bergantian antar monitor — yang juga persis meniru
+apa yang dilakukan viewer. Hasilnya, dengan enam pembangunan ulang dalam 60
+detik:
+
+```
+t= 6s  371 MB      t=36s  374 MB
+t=18s  371 MB      t=48s  373 MB
+t=30s  373 MB      t=60s  380 MB
+```
+
+Selisih 9 MB. Sebelum perbaikan, siklus yang sama menghasilkan sekitar 2,2 GB.
+
+Ikut diperbaiki: pemeriksa bitstream sempat melaporkan "TIDAK cocok" pada
+berkas uji rendam, karena ia membaca SPS pertama lalu membandingkannya dengan
+monitor terakhir. Sekarang ia melaporkan seluruh resolusi yang muncul —
+`1920×1080, 1080×1920 — aliran berpindah resolusi` — sehingga berkas yang sehat
+tidak lagi terlihat salah.
 
 **54. Keadaan M2**
 
