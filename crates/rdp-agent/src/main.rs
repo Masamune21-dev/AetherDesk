@@ -19,6 +19,7 @@ mod encode;
 mod identitas;
 mod input;
 mod dipercaya;
+mod gui;
 mod monitor;
 mod persetujuan;
 mod rtc;
@@ -39,6 +40,7 @@ fn main() -> Result<()> {
         "encode" => perintah_encode(&argumen[1..]),
         "enrol" | "enroll" => jalankan_async(perintah_enrol(&argumen[1..])),
         "connect" => jalankan_async(perintah_connect(&argumen[1..])),
+        "gui" => perintah_gui(&argumen[1..]),
         "status" => perintah_status(),
         "tepercaya" => perintah_tepercaya(&argumen[1..]),
         "alias" => jalankan_async(perintah_alias(&argumen[1..])),
@@ -76,7 +78,8 @@ PERINTAH
   monitors               Menyebutkan monitor beserta koordinat virtual desktop
   capture                Menangkap layar dan melaporkan hasilnya
   enrol --token <TOKEN>  Mendaftarkan mesin ini memakai token enrolment
-  connect                Menyambung ke server dan tetap online
+  gui                    Membuka jendela aplikasi dan menjalankan agent
+  connect                Menyambung ke server dan tetap online (tanpa jendela)
   status                 Menampilkan identitas perangkat, lokal dan server
   alias <NAMA>           Memberi alias yang mudah diingat (kosongkan: hapus)
   sandi                  Mengubah kata sandi sesi atau kata sandi tetap
@@ -608,7 +611,80 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
         tracing::info!(jumlah, "daftar kepercayaan dimuat");
     }
 
-    signal::jalankan(konfig, kunci, atur, penjaga).await
+    signal::jalankan(konfig, kunci, atur, penjaga, None).await
+}
+
+// ── gui ──────────────────────────────────────────────────────────────────────
+
+/// Menjalankan agent beserta jendelanya.
+///
+/// Runtime async dan event loop jendela hidup berdampingan: agent di
+/// thread-thread tokio, jendela di thread utama. `run_native` memblokir sampai
+/// jendela ditutup, dan runtime tetap hidup di scope ini selama itu.
+fn perintah_gui(argumen: &[String]) -> Result<()> {
+    let konfig = identitas::muat_konfig()?;
+    let kunci = identitas::muat_kunci()?;
+
+    let atur = rtc::Pengaturan {
+        monitor: opsi(argumen, "--monitor"),
+        fps: opsi(argumen, "--fps").and_then(|v| v.parse().ok()).unwrap_or(30),
+        bitrate: opsi(argumen, "--mbps")
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|m| (m * 1_000_000.0) as u32)
+            .unwrap_or(
+                opsi(argumen, "--fps")
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(30)
+                    .clamp(1, 120)
+                    * 133_333,
+            ),
+        izinkan_kendali: argumen.iter().any(|a| a == "--izinkan-kendali"),
+    };
+
+    let (tx_izin, rx_izin) = tokio::sync::mpsc::unbounded_channel();
+    let (tx_cmd, rx_cmd) = tokio::sync::mpsc::unbounded_channel();
+    let penjaga = persetujuan::Penjaga::baru(persetujuan::Mode::Tanya(tx_izin));
+    let daftar = penjaga.daftar();
+    let bersama = std::sync::Arc::new(std::sync::Mutex::new(gui::Bersama::default()));
+
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+
+    {
+        let konfig = konfig.clone();
+        let kunci_signal = rdp_core::DeviceKeypair::dari_seed(&kunci.seed())?;
+        let bersama = std::sync::Arc::clone(&bersama);
+        rt.spawn(async move {
+            if let Err(e) =
+                signal::jalankan(konfig, kunci_signal, atur, penjaga, Some(bersama)).await
+            {
+                tracing::error!(error = %format!("{e:#}"), "agent berhenti");
+            }
+        });
+    }
+
+    {
+        let klien = api::Klien::baru(konfig.api_base())?;
+        let konfig = konfig.clone();
+        let bersama = std::sync::Arc::clone(&bersama);
+        rt.spawn(gui::layani_perintah(klien, konfig, kunci, bersama, rx_cmd));
+    }
+
+    let opsi_jendela = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([440.0, 660.0])
+            .with_min_inner_size([380.0, 480.0])
+            .with_title("AetherDesk"),
+        ..Default::default()
+    };
+
+    let aplikasi = gui::Aplikasi::baru(bersama, daftar, rx_izin, tx_cmd, konfig);
+
+    eframe::run_native(
+        "AetherDesk",
+        opsi_jendela,
+        Box::new(move |_cc| Ok(Box::new(aplikasi))),
+    )
+    .map_err(|e| anyhow::anyhow!("gagal membuka jendela: {e}"))
 }
 
 // ── tepercaya ────────────────────────────────────────────────────────────────

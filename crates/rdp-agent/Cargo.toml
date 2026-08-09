@@ -25,6 +25,14 @@ futures-util = "0.3"
 # menambah satu variabel yang tidak perlu. 0.14 adalah rilis klasik terakhir,
 # dan itu yang dipakai hampir seluruh contoh yang ada.
 webrtc = "0.14"
+
+# Jendela aplikasi. `glow` (OpenGL) alih-alih `wgpu`: antarmukanya hanya teks
+# dan tombol, dan wgpu menyeret rantai dependensi yang jauh lebih besar untuk
+# kemampuan yang tidak dipakai satu pun di sini.
+eframe = { version = "0.29", default-features = false, features = [
+    "glow", "default_fonts",
+] }
+arboard = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 serde = { workspace = true }

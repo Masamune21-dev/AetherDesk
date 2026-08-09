@@ -918,7 +918,70 @@ saja, Batal berarti tolak.
 Jendela egui yang sesungguhnya — dengan ID, alias, kata sandi, dan daftar
 tepercaya yang dapat dicabut — tetap menjadi M5c.
 
-**69. Keadaan M2**
+**70. M5b terverifikasi ujung ke ujung**
+
+Kotak persetujuan muncul, dijawab "izinkan dan ingat", dan tersimpan:
+
+```json
+{
+  "user_id": "d5aee882-656d-4ac4-a8f4-9e4fa66f2307",
+  "email": "masamunekazuto21@gmail.com",
+  "diizinkan_pada": "2026-08-09T08:45:52Z",
+  "terakhir_dipakai": "2026-08-09T08:47:42Z"
+}
+```
+
+Setengah keduanya ikut terbukti: sesi diputus lalu disambung ulang, dan kali
+kedua **langsung masuk tanpa kotak muncul**. `terakhir_dipakai` terisi
+sementara `diizinkan_pada` tidak bergerak — properti yang diuji unit test,
+kini terlihat pada berkas sungguhan.
+
+Bonus dari data sesi: salah satu sesi berjalan **636 detik**. Jauh melewati 185
+detik tempat sesi mati sebelum perbaikan kebocoran, jadi kedua perbaikan memori
+terbukti di jalur nyata, bukan hanya di pengukuran.
+
+**71. M5c — jendela aplikasi**
+
+Agent akhirnya punya wajah. Satu berkas `.exe`, tanpa WebView2 dan tanpa
+runtime tambahan.
+
+| Bagian | Isi |
+|---|---|
+| Kepala | nama dan lampu status: siap, sedang dilihat, atau terputus |
+| Nomor | `543 096 477` besar, dengan tombol salin |
+| Alias | dapat diketik dan disimpan langsung |
+| Kata sandi sesi | tersembunyi, dengan tombol ganti; hasilnya terlihat sekali |
+| Kata sandi tetap | dipasang atau dihapus |
+| Daftar tepercaya | siapa, kapan terakhir dipakai, dan tombol cabut per orang |
+
+`glow` dipilih alih-alih `wgpu`: antarmukanya hanya teks dan tombol, dan wgpu
+menyeret rantai dependensi jauh lebih besar untuk kemampuan yang tidak dipakai
+satu pun di sini. Biner akhir **15,9 MB** — masih di bawah batas NFR-PER-06.
+
+**Dua dunia yang tetap terpisah.** Agent hidup di runtime async; jendela hidup
+di event loop-nya sendiri di thread utama. Keduanya hanya berbicara lewat
+channel dan satu mutex — tidak ada `await` di dalam penggambaran, dan tidak ada
+penggambaran di dalam task async.
+
+**Kotak persetujuan pindah ke dalam jendela.** `MessageBoxW` tidak dapat
+memberi label sendiri pada tombolnya, sehingga "Ya/Tidak/Batal" harus
+dijelaskan lewat isi pesan. Di dalam jendela, ketiganya akhirnya berbunyi
+seperti apa yang mereka lakukan: **Tolak**, **Izinkan sekali**, **Izinkan dan
+ingat**.
+
+Tombol Tolak diletakkan lebih dulu dan menerima fokus, mengikuti
+QUICK_CONNECT.md §4.1 — menekan Enter tanpa membaca berarti menolak, bukan
+mengizinkan. Permintaan yang datang saat jendela terminimalkan memaksa jendela
+tampil ke depan; permintaan yang tersembunyi di balik jendela lain sama saja
+dengan tidak bertanya.
+
+`rdp-agent gui` menjalankan agent beserta jendelanya; `rdp-agent connect` tetap
+ada untuk mesin tanpa layar.
+
+**Belum ada:** ikon tray, sehingga menutup jendela menghentikan agent. Itu dan
+installer menjadi M5d.
+
+**72. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

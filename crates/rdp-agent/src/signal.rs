@@ -61,12 +61,14 @@ pub async fn jalankan(
     kunci: DeviceKeypair,
     atur: rtc::Pengaturan,
     penjaga: crate::persetujuan::Penjaga,
+    // Keadaan yang ditampilkan jendela, bila ada.
+    status: Option<std::sync::Arc<std::sync::Mutex<crate::gui::Bersama>>>,
 ) -> Result<()> {
     let klien = Klien::baru(konfig.api_base())?;
     let mut jeda = BACKOFF_AWAL;
 
     loop {
-        match satu_sesi(&klien, &konfig, &kunci, &atur, &penjaga).await {
+        match satu_sesi(&klien, &konfig, &kunci, &atur, &penjaga, status.as_ref()).await {
             Ok(()) => {
                 tracing::warn!("koneksi signaling tertutup, menyambung ulang");
                 // Koneksi yang sempat berdiri berarti servernya sehat; jangan
@@ -75,6 +77,14 @@ pub async fn jalankan(
                 jeda = BACKOFF_AWAL;
             }
             Err(e) => tracing::error!(error = %format!("{e:#}"), "sesi signaling gagal"),
+        }
+
+        // Koneksi baru saja berakhir, apa pun sebabnya.
+        if let Some(s) = &status {
+            if let Ok(mut g) = s.lock() {
+                g.tersambung = false;
+                g.sesi_aktif = None;
+            }
         }
 
         tracing::info!(detik = jeda.as_secs(), "menunggu sebelum mencoba lagi");
@@ -95,6 +105,7 @@ async fn satu_sesi(
     kunci: &DeviceKeypair,
     atur: &rtc::Pengaturan,
     penjaga: &crate::persetujuan::Penjaga,
+    status: Option<&std::sync::Arc<std::sync::Mutex<crate::gui::Bersama>>>,
 ) -> Result<()> {
     let mut token = ambil_token(klien, konfig, kunci).await?;
 
@@ -144,7 +155,8 @@ async fn satu_sesi(
                 let Some(pesan) = pesan else { break };
                 match pesan.context("kesalahan membaca WebSocket")? {
                     Message::Text(t) => {
-                        tangani(&t, konfig, atur, &ice, penjaga, &tx_keluar, &mut aktif).await;
+                        tangani(&t, konfig, atur, &ice, penjaga, status, &tx_keluar, &mut aktif)
+                            .await;
                     }
                     Message::Close(c) => {
                         tracing::warn!(?c, "server menutup koneksi");
@@ -190,9 +202,22 @@ async fn tangani(
     atur: &rtc::Pengaturan,
     ice: &[RTCIceServer],
     penjaga: &crate::persetujuan::Penjaga,
+    status: Option<&std::sync::Arc<std::sync::Mutex<crate::gui::Bersama>>>,
     tx: &mpsc::UnboundedSender<String>,
     aktif: &mut Option<Aktif>,
 ) {
+    /// Memperbarui keadaan yang ditampilkan jendela, bila jendelanya ada.
+    fn lapor(
+        status: Option<&std::sync::Arc<std::sync::Mutex<crate::gui::Bersama>>>,
+        ubah: impl FnOnce(&mut crate::gui::Bersama),
+    ) {
+        if let Some(s) = status {
+            if let Ok(mut g) = s.lock() {
+                ubah(&mut g);
+            }
+        }
+    }
+
     let Ok(pesan) = serde_json::from_str::<Value>(teks) else {
         tracing::debug!("pesan bukan JSON");
         return;
@@ -208,6 +233,7 @@ async fn tangani(
                 device_id = %konfig.device_id,
                 "terautentikasi sebagai agent — perangkat kini online"
             );
+            lapor(status, |g| g.tersambung = true);
         }
 
         "PING" => {
@@ -268,6 +294,8 @@ async fn tangani(
                         })
                         .to_string(),
                     );
+                    let email = peminta.email.clone();
+                    lapor(status, move |g| g.sesi_aktif = Some(email));
                     *aktif = Some(Aktif { session_id: sid, media });
                 }
                 Err(e) => {
@@ -312,6 +340,7 @@ async fn tangani(
                 tracing::info!(sid = %a.session_id, "sesi diakhiri");
                 a.media.tutup().await;
             }
+            lapor(status, |g| g.sesi_aktif = None);
         }
 
         "ERROR" => {
