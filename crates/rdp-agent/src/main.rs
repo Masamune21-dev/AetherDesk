@@ -18,7 +18,9 @@ mod capture;
 mod encode;
 mod identitas;
 mod input;
+mod dipercaya;
 mod monitor;
+mod persetujuan;
 mod rtc;
 mod signal;
 
@@ -38,6 +40,7 @@ fn main() -> Result<()> {
         "enrol" | "enroll" => jalankan_async(perintah_enrol(&argumen[1..])),
         "connect" => jalankan_async(perintah_connect(&argumen[1..])),
         "status" => perintah_status(),
+        "tepercaya" => perintah_tepercaya(&argumen[1..]),
         "alias" => jalankan_async(perintah_alias(&argumen[1..])),
         "sandi" => jalankan_async(perintah_sandi(&argumen[1..])),
         "--help" | "-h" | "help" => {
@@ -77,7 +80,12 @@ PERINTAH
   status                 Menampilkan identitas perangkat, lokal dan server
   alias <NAMA>           Memberi alias yang mudah diingat (kosongkan: hapus)
   sandi                  Mengubah kata sandi sesi atau kata sandi tetap
+  tepercaya              Melihat siapa yang pernah diizinkan mengakses mesin ini
   help                   Menampilkan bantuan ini
+
+OPSI tepercaya
+  --cabut <EMAIL>        Mencabut satu orang
+  --kosongkan            Mencabut semuanya
 
 OPSI sandi
   --rotasi               Membangkitkan kata sandi sesi acak yang baru
@@ -95,6 +103,10 @@ OPSI connect
   --mbps <N>             Sasaran bitrate (baku: 4)
   --izinkan-kendali      Izinkan viewer menggerakkan mouse dan mengetik.
                          BAKU MATI. Lihat NEXT_PLAN.md §7 sebelum memakainya.
+  --tanpa-dialog         Jangan memunculkan kotak persetujuan; hanya terima
+                         orang yang sudah ada di daftar kepercayaan.
+  --izinkan-semua        Terima setiap permintaan tanpa bertanya. Hanya untuk
+                         mesin yang sepenuhnya milik Anda sendiri.
 
 OPSI capture
   --monitor <NAMA>       Nama perangkat, mis. \\\\.\\DISPLAY2 (baku: primer)
@@ -572,7 +584,81 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
         Err(e) => tracing::warn!(error = %e, "enumerasi monitor gagal"),
     }
 
-    signal::jalankan(konfig, kunci, atur).await
+    // Mode persetujuan. Tanpa antarmuka, satu-satunya pilihan jujur adalah
+    // menolak yang belum dipercaya — kecuali pemiliknya menyatakan sebaliknya
+    // secara eksplisit.
+    let mode = if argumen.iter().any(|a| a == "--izinkan-semua") {
+        println!("  ⚠ Setiap permintaan sesi akan diterima tanpa ditanyakan.\n");
+        persetujuan::Mode::IzinkanSemua
+    } else if argumen.iter().any(|a| a == "--tanpa-dialog") {
+        println!("  Hanya orang yang sudah ada di daftar kepercayaan yang diterima.\n");
+        persetujuan::Mode::HanyaTepercaya
+    } else {
+        println!(
+            "  Permintaan dari orang yang belum dipercaya akan memunculkan\n  \
+             kotak persetujuan di mesin ini.\n"
+        );
+        persetujuan::Mode::Dialog
+    };
+    let penjaga = persetujuan::Penjaga::baru(mode);
+
+    {
+        let d = penjaga.daftar();
+        let jumlah = d.lock().map(|g| g.entri.len()).unwrap_or(0);
+        tracing::info!(jumlah, "daftar kepercayaan dimuat");
+    }
+
+    signal::jalankan(konfig, kunci, atur, penjaga).await
+}
+
+// ── tepercaya ────────────────────────────────────────────────────────────────
+
+fn perintah_tepercaya(argumen: &[String]) -> Result<()> {
+    let mut daftar = dipercaya::Daftar::muat();
+
+    if argumen.iter().any(|a| a == "--kosongkan") {
+        let n = daftar.entri.len();
+        daftar.kosongkan();
+        daftar.simpan()?;
+        println!("\n{n} entri dihapus. Semua orang harus diizinkan ulang.");
+        return Ok(());
+    }
+
+    if let Some(email) = opsi(argumen, "--cabut") {
+        let target = daftar.entri.iter().find(|e| e.email == email).map(|e| e.user_id);
+        match target {
+            Some(id) if daftar.cabut(id) => {
+                daftar.simpan()?;
+                println!("\n{email} dicabut. Ia harus diizinkan lagi lain kali.");
+            }
+            _ => println!("\n{email} tidak ada di daftar."),
+        }
+        return Ok(());
+    }
+
+    if daftar.entri.is_empty() {
+        println!(
+            "\nBelum ada siapa pun yang dipercaya.\n\n\
+             Setiap permintaan sesi akan ditolak sampai ada yang diizinkan\n\
+             lewat jendela persetujuan."
+        );
+        return Ok(());
+    }
+
+    println!("\n{} orang dipercaya\n", daftar.entri.len());
+    println!("{:<34} {:<12} {}", "EMAIL", "DIIZINKAN", "TERAKHIR DIPAKAI");
+    println!("{}", "─".repeat(64));
+    for e in &daftar.entri {
+        println!(
+            "{:<34} {:<12} {}",
+            potong(&e.email, 34),
+            e.diizinkan_pada.format("%Y-%m-%d"),
+            e.terakhir_dipakai
+                .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "belum pernah".into())
+        );
+    }
+    Ok(())
 }
 
 // ── swalayan ─────────────────────────────────────────────────────────────────

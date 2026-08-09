@@ -362,6 +362,9 @@ async fn rutekan(
                 &agent,
                 &Keluar::SessionOffer {
                     session_id: *session_id,
+                    // Dari klaim token yang sudah diverifikasi, tidak pernah
+                    // dari apa pun yang dikirim viewer.
+                    viewer_user_id: claims.sub,
                     viewer_name: claims.email.clone(),
                     viewer_email: claims.email.clone(),
                     viewer_ip: String::new(),

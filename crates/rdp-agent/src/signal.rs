@@ -60,12 +60,13 @@ pub async fn jalankan(
     konfig: Konfigurasi,
     kunci: DeviceKeypair,
     atur: rtc::Pengaturan,
+    penjaga: crate::persetujuan::Penjaga,
 ) -> Result<()> {
     let klien = Klien::baru(konfig.api_base())?;
     let mut jeda = BACKOFF_AWAL;
 
     loop {
-        match satu_sesi(&klien, &konfig, &kunci, &atur).await {
+        match satu_sesi(&klien, &konfig, &kunci, &atur, &penjaga).await {
             Ok(()) => {
                 tracing::warn!("koneksi signaling tertutup, menyambung ulang");
                 // Koneksi yang sempat berdiri berarti servernya sehat; jangan
@@ -93,6 +94,7 @@ async fn satu_sesi(
     konfig: &Konfigurasi,
     kunci: &DeviceKeypair,
     atur: &rtc::Pengaturan,
+    penjaga: &crate::persetujuan::Penjaga,
 ) -> Result<()> {
     let mut token = ambil_token(klien, konfig, kunci).await?;
 
@@ -142,7 +144,7 @@ async fn satu_sesi(
                 let Some(pesan) = pesan else { break };
                 match pesan.context("kesalahan membaca WebSocket")? {
                     Message::Text(t) => {
-                        tangani(&t, konfig, atur, &ice, &tx_keluar, &mut aktif).await;
+                        tangani(&t, konfig, atur, &ice, penjaga, &tx_keluar, &mut aktif).await;
                     }
                     Message::Close(c) => {
                         tracing::warn!(?c, "server menutup koneksi");
@@ -187,6 +189,7 @@ async fn tangani(
     konfig: &Konfigurasi,
     atur: &rtc::Pengaturan,
     ice: &[RTCIceServer],
+    penjaga: &crate::persetujuan::Penjaga,
     tx: &mpsc::UnboundedSender<String>,
     aktif: &mut Option<Aktif>,
 ) {
@@ -216,11 +219,33 @@ async fn tangani(
                 tracing::warn!("SESSION_OFFER tanpa session_id");
                 return;
             };
-            let peminta = payload
-                .and_then(|p| p.get("viewer_email"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("tidak diketahui")
-                .to_string();
+            let peminta = crate::persetujuan::Peminta {
+                // Tanpa identitas yang stabil, tidak ada yang dapat diingat.
+                // Server selalu mengirimkannya; ketiadaannya berarti server
+                // lebih tua daripada agent ini, dan menebak siapa pemintanya
+                // bukan pilihan yang sah.
+                user_id: match ambil_uuid(payload, "viewer_user_id") {
+                    Some(u) => u,
+                    None => {
+                        tracing::error!("SESSION_OFFER tanpa viewer_user_id — permintaan ditolak");
+                        let _ = tx.send(tolak(sid, "server tidak mengirim identitas peminta"));
+                        return;
+                    }
+                },
+                nama: medan_teks(payload, "viewer_name")
+                    .unwrap_or_else(|| "tidak diketahui".into()),
+                email: medan_teks(payload, "viewer_email").unwrap_or_default(),
+                ip: medan_teks(payload, "viewer_ip").unwrap_or_default(),
+            };
+
+            // Persetujuan diminta **sebelum** capture disiapkan. Membuka
+            // Desktop Duplication lebih dulu berarti mesin mulai menangkap
+            // layarnya untuk permintaan yang mungkin ditolak.
+            if !penjaga.putuskan(&peminta).await {
+                tracing::info!(%sid, peminta = %peminta.email, "permintaan sesi ditolak");
+                let _ = tx.send(tolak(sid, "permintaan tidak disetujui di perangkat tujuan"));
+                return;
+            }
 
             // Satu sesi pada satu waktu. Sesi kedua akan berebut capture yang
             // sama, dan Desktop Duplication hanya boleh dipegang satu pihak.
@@ -231,7 +256,7 @@ async fn tangani(
 
             match rtc::SesiMedia::mulai(ice.to_vec(), atur.clone(), tx.clone(), sid).await {
                 Ok((media, sdp)) => {
-                    tracing::info!(%sid, %peminta, "sesi diterima, offer dikirim");
+                    tracing::info!(%sid, peminta = %peminta.email, "sesi diterima, offer dikirim");
                     let _ = tx.send(
                         json!({ "type": "SESSION_ACCEPT", "payload": { "session_id": sid } })
                             .to_string(),
@@ -246,20 +271,8 @@ async fn tangani(
                     *aktif = Some(Aktif { session_id: sid, media });
                 }
                 Err(e) => {
-                    // Menolak dengan alasan tertulis, bukan mendiamkan. Viewer
-                    // yang menunggu tanpa jawaban jauh lebih membingungkan
-                    // daripada penolakan yang menyebut sebabnya.
                     tracing::error!(%sid, error = %format!("{e:#}"), "gagal memulai media");
-                    let _ = tx.send(
-                        json!({
-                            "type": "SESSION_REJECT",
-                            "payload": {
-                                "session_id": sid,
-                                "reason": format!("agent gagal memulai capture: {e}"),
-                            },
-                        })
-                        .to_string(),
-                    );
+                    let _ = tx.send(tolak(sid, &format!("agent gagal memulai capture: {e}")));
                 }
             }
         }
@@ -353,6 +366,26 @@ fn ubah_ice(daftar: Vec<crate::api::IceServer>) -> Vec<RTCIceServer> {
             credential: s.credential.unwrap_or_default(),
         })
         .collect()
+}
+
+/// Pesan penolakan sesi, dengan alasan yang tertulis.
+///
+/// Viewer yang menunggu tanpa jawaban jauh lebih membingungkan daripada
+/// penolakan yang menyebut sebabnya.
+fn tolak(sid: Uuid, alasan: &str) -> String {
+    json!({
+        "type": "SESSION_REJECT",
+        "payload": { "session_id": sid, "reason": alasan },
+    })
+    .to_string()
+}
+
+fn medan_teks(payload: Option<&Value>, kunci: &str) -> Option<String> {
+    payload
+        .and_then(|p| p.get(kunci))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 fn ambil_uuid(payload: Option<&Value>, kunci: &str) -> Option<Uuid> {

@@ -856,7 +856,69 @@ check digit Damm sulit dihitung di kepala, dan vektor karangan itu memang tidak
 sah. Ujinya kini membangkitkan nomor lewat `DeviceId::generate()` alih-alih
 mengarangnya.
 
-**66. Keadaan M2**
+**67. M5b — persetujuan dan daftar kepercayaan**
+
+Menutup lubang yang ditandai sejak butir 49: agent native **menerima setiap
+permintaan sesi secara otomatis**, karena ia tidak punya antarmuka untuk
+bertanya. QUICK_CONNECT.md §4.1 mewajibkan prompt yang menyebutkan siapa yang
+meminta; agent berbasis browser memenuhinya sejak awal, agent native tidak
+pernah bisa.
+
+Sekarang bisa, dan sekaligus mewujudkan yang diminta: **izinkan sekali,
+berikutnya tidak usah**.
+
+| Mode | Perilaku |
+|---|---|
+| `--izinkan-semua` | menerima siapa pun — hanya untuk mesin sendiri |
+| `--tanpa-dialog` | hanya yang sudah ada di daftar |
+| baku | memunculkan kotak persetujuan, lalu mengingat jawabannya |
+
+**Daftar kepercayaan hidup di mesin agent, bukan di server.** Itu bukan detail
+penyimpanan. Persetujuan adalah milik orang yang duduk di depan mesin itu;
+menaruh daftarnya di server berarti siapa pun yang menguasai server dapat
+menambahkan dirinya sendiri ke dalamnya. Server tidak pernah tahu isinya dan
+tidak pernah dapat mengubahnya.
+
+Konsekuensi yang diterima: memasang ulang agent menghapus seluruh kepercayaan.
+Itu justru benar — mesin yang baru dipasang belum pernah menyetujui siapa pun.
+
+**Dipercaya berdasarkan `user_id`, bukan email.** Email dapat berpindah
+pemilik, dan daftar yang menunjuk email lama akan diam-diam mengizinkan orang
+yang salah. Karena itu `SessionOffer` di protokol signaling diberi
+`viewer_user_id`, diambil dari klaim token yang sudah diverifikasi — tidak
+pernah dari apa pun yang dikirim viewer. Prompt yang menampilkan nama pilihan
+penyerang sendiri justru membantu penipuan.
+
+Tiga keadaan yang semuanya berakhir sebagai penolakan, dan masing-masing
+disengaja: tidak dijawab dalam 45 detik, jendela ditutup tanpa memilih, dan
+daftar kepercayaan yang gagal dibaca. **Diam bukan persetujuan**, dan berkas
+rusak tidak boleh berubah menjadi izin.
+
+Persetujuan diminta **sebelum** capture disiapkan. Membuka Desktop Duplication
+lebih dulu berarti mesin mulai menangkap layarnya untuk permintaan yang mungkin
+ditolak.
+
+**68. Kotak dialog dulu, jendela menyusul**
+
+Rencana awalnya langsung ke jendela egui. Tetapi M5b tanpa antarmuka membuat
+agent menolak **semuanya** — daftar masih kosong dan tidak ada yang bisa
+ditanya — sehingga merilisnya sendirian justru membuat keadaan lebih buruk
+daripada sebelumnya.
+
+Karena itu persetujuan memakai `MessageBoxW` lebih dulu: sudah ada di crate
+`windows` yang dipakai capture, jadi tanpa satu pun dependensi baru. Bentuknya
+sederhana dan tombolnya mengikuti bahasa sistem, tetapi ia muncul di depan
+(`MB_SYSTEMMODAL`), memaksa jawaban, dan menyebutkan siapa yang meminta beserta
+apa yang dapat ia lakukan.
+
+Pemetaan tombolnya ditulis di dalam pesannya sendiri, karena label Yes/No/Cancel
+tidak dapat diubah: Ya berarti izinkan dan ingat, Tidak berarti izinkan sekali
+saja, Batal berarti tolak.
+
+Jendela egui yang sesungguhnya — dengan ID, alias, kata sandi, dan daftar
+tepercaya yang dapat dicabut — tetap menjadi M5c.
+
+**69. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

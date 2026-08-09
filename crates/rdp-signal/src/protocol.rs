@@ -49,6 +49,14 @@ pub enum Keluar {
     /// Diteruskan ke agent saat ada viewer meminta koneksi.
     SessionOffer {
         session_id: Uuid,
+        /// Identitas yang dipakai agent untuk mengingat siapa yang pernah
+        /// diizinkan.
+        ///
+        /// Bukan email: email dapat berpindah pemilik, dan daftar kepercayaan
+        /// yang menunjuk email lama akan diam-diam mengizinkan orang yang salah.
+        /// Nilainya diambil dari klaim token yang sudah diverifikasi, tidak
+        /// pernah dari apa pun yang dikirim viewer.
+        viewer_user_id: Uuid,
         viewer_name: String,
         viewer_email: String,
         /// Ditampilkan pada prompt persetujuan; QUICK_CONNECT.md §4.1
