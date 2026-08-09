@@ -501,15 +501,26 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
     let konfig = identitas::muat_konfig()?;
     let kunci = identitas::muat_kunci()?;
 
+    let fps: u32 = opsi(argumen, "--fps")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
+
     let atur = rtc::Pengaturan {
         monitor: opsi(argumen, "--monitor"),
-        fps: opsi(argumen, "--fps")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(30),
+        fps,
+        // Bitrate baku mengikuti laju frame, bukan angka tetap.
+        //
+        // Bitrate adalah anggaran per **detik**; yang menentukan ketajaman
+        // adalah anggaran per **frame**. Angka tetap membuat `--fps 60`
+        // diam-diam memotong separuh jatah tiap frame, dan gejalanya muncul
+        // persis saat seluruh layar berubah — scroll cepat menjadi buram
+        // seolah resolusinya turun.
+        //
+        // Sekitar 133 kbit per frame: 4 Mbps pada 30 fps, 8 Mbps pada 60.
         bitrate: opsi(argumen, "--mbps")
             .and_then(|v| v.parse::<f64>().ok())
             .map(|m| (m * 1_000_000.0) as u32)
-            .unwrap_or(4_000_000),
+            .unwrap_or(fps.clamp(1, 120) * 133_333),
         izinkan_kendali: argumen.iter().any(|a| a == "--izinkan-kendali"),
     };
 
