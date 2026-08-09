@@ -17,7 +17,7 @@ mod state;
 use anyhow::{Context, Result};
 use auth::jwt::JwtKeys;
 use axum::{
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use config::Config;
@@ -107,6 +107,11 @@ async fn main() -> Result<()> {
         .route("/devices/enrol", post(routes::enrolment::enrol))
         .route("/devices/token", post(routes::enrolment::token_perangkat))
         .route("/devices/heartbeat", post(routes::enrolment::heartbeat))
+        // Swalayan: perangkat mengubah identitasnya sendiri memakai token
+        // perangkat, tanpa pemiliknya perlu membuka dashboard.
+        .route("/devices/self", get(routes::swalayan::diri))
+        .route("/devices/self/handle", put(routes::swalayan::set_handle))
+        .route("/devices/self/passwords", put(routes::swalayan::set_sandi))
         .route("/connect", post(routes::connect::connect))
         .route("/turn-credentials", get(routes::turn::kredensial))
         .route("/sessions", get(routes::sessions::daftar))

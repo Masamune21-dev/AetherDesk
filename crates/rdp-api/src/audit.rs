@@ -31,6 +31,7 @@ pub mod aksi {
     pub const DEVICE_SANDI_DIROTASI: &str = "device.rotate_password";
     pub const DEVICE_TOKEN_ENROLMENT: &str = "device.enrolment_token";
     pub const DEVICE_ENROL: &str = "device.enrol";
+    pub const DEVICE_ALIAS_DIUBAH: &str = "device.set_handle";
     pub const SESI_DIMINTA: &str = "session.request";
     pub const SESI_DITOLAK: &str = "session.rejected";
 }
@@ -86,6 +87,7 @@ mod tests {
             aksi::DEVICE_SANDI_DIROTASI,
             aksi::DEVICE_TOKEN_ENROLMENT,
             aksi::DEVICE_ENROL,
+            aksi::DEVICE_ALIAS_DIUBAH,
             aksi::SESI_DIMINTA,
             aksi::SESI_DITOLAK,
         ] {

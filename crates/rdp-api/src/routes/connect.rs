@@ -68,9 +68,14 @@ async fn jalankan(
 ) -> ApiResult<Sukses<ConnectResp>> {
     let mut redis = state.redis.clone();
 
-    // ── 1. Check digit dulu ──────────────────────────────────────────────────
-    // 90% string sembilan digit gagal di sini, tanpa satu pun query database.
-    let Ok(device_id) = DeviceId::parse(&req.device_id) else {
+    // ── 1. Bentuk masukan ────────────────────────────────────────────────────
+    //
+    // Nomor dan alias hidup berdampingan sejak migrasi 0006. Yang menyerupai
+    // nomor tetap diperiksa check digit-nya lebih dulu — 90% string sembilan
+    // digit gagal di situ, tanpa satu pun query database. Yang lain
+    // diperlakukan sebagai alias, dan alias tidak punya check digit untuk
+    // disaring, jadi ia langsung menjadi urusan basis data.
+    let Some(kunci) = normalkan_kunci(&req.device_id) else {
         catat(state, &req.device_id, ip, QuickConnectOutcome::UnknownId, claims).await;
         let _ = ratelimit::catat_kegagalan(
             &mut redis,
@@ -82,12 +87,12 @@ async fn jalankan(
     };
 
     // ── 2. Sedang dijeda? ────────────────────────────────────────────────────
-    let kunci_device = format!("qc:{}", device_id.as_str());
+    let kunci_device = format!("qc:{kunci}");
     if let Keputusan::Dijeda { retry_after_seconds } =
         ratelimit::periksa(&mut redis, &kunci_device).await?
     {
         catat(state, &req.device_id, ip, QuickConnectOutcome::Throttled, claims).await;
-        tracing::warn!(device = %device_id, %ip, "quick connect ditolak: sedang dijeda");
+        tracing::warn!(device = %kunci, %ip, "quick connect ditolak: sedang dijeda");
         // Sengaja tidak memberi tahu bahwa jedanya ada — itu sendiri
         // mengonfirmasi device ID-nya hidup.
         let _ = retry_after_seconds;
@@ -95,15 +100,17 @@ async fn jalankan(
     }
 
     // ── 3. Resolusi lintas-tenant ────────────────────────────────────────────
-    let baris: Option<(Uuid, Uuid, Option<String>, bool, String)> = sqlx::query_as(
-        "SELECT device_uuid, org_id, password_hash, enabled, status
-         FROM resolve_quick_connect($1)",
+    let baris: Option<(Uuid, Uuid, Option<String>, Option<String>, bool, String)> = sqlx::query_as(
+        "SELECT device_uuid, org_id, session_hash, unattended_hash, enabled, status
+         FROM resolve_connect_key($1)",
     )
-    .bind(device_id.as_str())
+    .bind(&kunci)
     .fetch_optional(&state.db)
     .await?;
 
-    let Some((device_uuid, org_id, Some(password_hash), enabled, status)) = baris else {
+    // Perangkat tanpa satu pun kata sandi tidak dapat diakses lewat Quick
+    // Connect, dan itu tidak dibedakan dari perangkat yang tidak ada.
+    let Some((device_uuid, org_id, sesi_hash, tetap_hash, enabled, status)) = baris else {
         // Mencakup dua kasus sekaligus: ID tidak ada, dan ID ada tetapi belum
         // pernah punya password sesi. Keduanya menghasilkan respons sama.
         hash::verify_dummy(&req.password);
@@ -124,11 +131,37 @@ async fn jalankan(
     }
 
     // ── 4. Verifikasi password ───────────────────────────────────────────────
+    //
+    // Dua kata sandi dapat berlaku: yang acak dan berotasi untuk bantuan
+    // sesaat, dan yang tetap pilihan pemilik untuk mesinnya sendiri.
+    //
+    // **Keduanya selalu diperiksa**, bahkan setelah yang pertama cocok. Berhenti
+    // lebih awal membuat lama respons memberi tahu kata sandi mana yang benar,
+    // dan itu memberi penyerang cara memilah tebakannya. Argon2id memang mahal,
+    // tetapi lantai waktu 250 ms sudah menutupi biaya keduanya.
     let dinormalkan = rdp_core::password::normalize(&req.password);
-    if !hash::verify(&dinormalkan, &password_hash) {
+    let cocok_sesi = match &sesi_hash {
+        Some(h) => hash::verify(&dinormalkan, h),
+        None => {
+            hash::verify_dummy(&req.password);
+            false
+        }
+    };
+    // Kata sandi tetap tidak dinormalkan: ia dipilih manusia dan boleh memuat
+    // huruf kecil, spasi, maupun simbol. Menormalkannya seperti kata sandi sesi
+    // akan diam-diam mengubah apa yang pengguna ketik.
+    let cocok_tetap = match &tetap_hash {
+        Some(h) => hash::verify(&req.password, h),
+        None => {
+            hash::verify_dummy(&req.password);
+            false
+        }
+    };
+
+    if !cocok_sesi && !cocok_tetap {
         catat(state, &req.device_id, ip, QuickConnectOutcome::BadPassword, claims).await;
         ratelimit::catat_kegagalan(&mut redis, &kunci_device, ratelimit::PER_DEVICE).await?;
-        tracing::info!(device = %device_id, %ip, "quick connect ditolak: password salah");
+        tracing::info!(device = %kunci, %ip, "quick connect ditolak: password salah");
         return Err(ApiError::ConnectDitolak);
     }
 
@@ -154,7 +187,7 @@ async fn jalankan(
     .bind(org_id)
     .bind(device_uuid)
     .bind(claims.user_id())
-    .bind(device_id.as_str())
+    .bind(&kunci)
     .bind(&claims.email)
     .fetch_one(&mut *tx)
     .await?;
@@ -166,17 +199,65 @@ async fn jalankan(
     audit::catat(&state.db, audit::Entri {
         org_id, user_id: Some(claims.user_id()), ip, aksi: aksi::SESI_DIMINTA,
         payload: Some(serde_json::json!({
-            "session_id": session_id, "device_id": device_id.as_str(),
+            "session_id": session_id,
+            "kunci": kunci,
+            // Berguna saat menyelidiki insiden: kata sandi tetap yang dipakai
+            // berarti akses tanpa pengawasan, bukan bantuan sesaat.
+            "lewat_sandi_tetap": cocok_tetap && !cocok_sesi,
         })),
     }).await;
 
-    tracing::info!(device = %device_id, %session_id, "quick connect diterima, menunggu persetujuan");
+    tracing::info!(device = %kunci, %session_id, "quick connect diterima, menunggu persetujuan");
 
     Ok(Sukses::baru(ConnectResp {
         session_id,
         device_uuid,
         status: "pending_approval",
     }))
+}
+
+/// Menormalkan masukan Quick Connect menjadi nomor atau alias.
+///
+/// Mengembalikan `None` bila bentuknya tidak mungkin cocok dengan apa pun —
+/// dan menolak di sini berarti menolak **tanpa satu pun query database**, yang
+/// pada string sembilan digit acak berlaku untuk sekitar 90% masukan.
+///
+/// Alias tidak punya check digit untuk disaring, sehingga ia hanya dibatasi
+/// bentuknya. Batasan itu sama dengan yang ditegakkan saat alias dipasang, jadi
+/// apa pun yang lolos di sini setidaknya *mungkin* ada.
+fn normalkan_kunci(masukan: &str) -> Option<String> {
+    let dipangkas = masukan.trim();
+
+    // ── Bentuk nomor ────────────────────────────────────────────────────────
+    // Hanya digit beserta pemisah yang wajar diketik orang: `942 716 382` dan
+    // `942-716-382` sama sahnya dengan `942716382`.
+    let mirip_nomor = !dipangkas.is_empty()
+        && dipangkas
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == ' ' || c == '-');
+
+    if mirip_nomor {
+        let digit: String = dipangkas.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digit.len() == 9 {
+            // Sembilan digit **selalu** diperlakukan sebagai nomor, dan check
+            // digit yang salah berhenti di sini — tanpa satu pun query.
+            // Membiarkannya jatuh ke jalur alias akan membuang properti itu,
+            // karena alias sembilan digit dilarang dan tidak akan pernah cocok.
+            return DeviceId::parse(&digit).ok().map(|d| d.to_string());
+        }
+    }
+
+    // ── Bentuk alias ────────────────────────────────────────────────────────
+    // Tanpa spasi sama sekali. Alias dibacakan lewat telepon sama seperti
+    // nomor, dan spasi di dalamnya hanya menambah cara untuk salah dengar.
+    let alias = dipangkas.to_lowercase();
+    let bentuk_sah = (3..=32).contains(&alias.chars().count())
+        && alias
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        && alias.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+
+    bentuk_sah.then_some(alias)
 }
 
 /// Mencatat upaya lewat SECURITY DEFINER, karena mayoritas baris justru
@@ -245,6 +326,71 @@ mod tests {
         let sebelum = t0.elapsed();
         normalkan_waktu(t0).await;
         assert_eq!(t0.elapsed(), sebelum, "respons lambat justru diperpanjang");
+    }
+
+    #[test]
+    fn nomor_diterima_dalam_bentuk_yang_wajar_diketik() {
+        // Nomornya dibangkitkan, bukan ditulis tangan: check digit Damm sulit
+        // dihitung di kepala, dan vektor karangan justru sudah pernah membuat
+        // uji ini gagal karena datanya yang salah, bukan kodenya.
+        let nomor = DeviceId::generate().to_string();
+        let sisip = |pemisah: char| {
+            format!(
+                "{}{pemisah}{}{pemisah}{}",
+                &nomor[0..3],
+                &nomor[3..6],
+                &nomor[6..9]
+            )
+        };
+
+        let polos = normalkan_kunci(&nomor);
+        assert_eq!(polos.as_deref(), Some(nomor.as_str()), "nomor polos ditolak");
+        assert_eq!(normalkan_kunci(&sisip(' ')), polos, "bentuk berspasi");
+        assert_eq!(normalkan_kunci(&sisip('-')), polos, "bentuk bertanda hubung");
+    }
+
+    #[test]
+    fn nomor_dengan_check_digit_salah_ditolak_tanpa_query() {
+        // Inilah yang membuang mayoritas pemindaian sebelum menyentuh
+        // database. Digit terakhir digeser sehingga check digit-nya pasti
+        // tidak lagi cocok.
+        let nomor = DeviceId::generate().to_string();
+        let akhir = nomor.chars().last().unwrap().to_digit(10).unwrap();
+        let rusak = format!("{}{}", &nomor[0..8], (akhir + 1) % 10);
+        assert_eq!(normalkan_kunci(&rusak), None, "check digit salah lolos: {rusak}");
+    }
+
+    #[test]
+    fn alias_diterima_dan_dinormalkan() {
+        assert_eq!(normalkan_kunci("PC-Kantor").as_deref(), Some("pc-kantor"));
+        assert_eq!(normalkan_kunci("  laptop_01  ").as_deref(), Some("laptop_01"));
+    }
+
+    #[test]
+    fn masukan_yang_mustahil_cocok_ditolak_lebih_dulu() {
+        for buruk in ["", "ab", "pc kantor", "-awal", "pc@kantor", &"a".repeat(33)] {
+            assert_eq!(normalkan_kunci(buruk), None, "diterima padahal mustahil: {buruk}");
+        }
+    }
+
+    #[test]
+    fn sembilan_digit_tidak_pernah_jatuh_ke_jalur_alias() {
+        // Sembilan digit selalu nomor. Yang check digit-nya salah harus
+        // berhenti sebagai None, bukan diteruskan sebagai alias sembilan digit
+        // — bentuk yang justru dilarang saat alias dipasang, sehingga query-nya
+        // dijamin sia-sia.
+        for _ in 0..50 {
+            let acak: String = (0..9)
+                .map(|_| char::from_digit(rand::random::<u32>() % 10, 10).unwrap())
+                .collect();
+            match normalkan_kunci(&acak) {
+                Some(k) => assert!(
+                    rdp_core::DeviceId::parse(&k).is_ok(),
+                    "sembilan digit diterima tanpa check digit sah: {k}"
+                ),
+                None => {}
+            }
+        }
     }
 
     #[test]

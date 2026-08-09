@@ -776,7 +776,87 @@ sebelum yang terbaru sampai — dan viewer meminta `playoutDelayHint = 0`, karen
 baku browser menukar latensi dengan kemulusan, pertukaran yang terbalik pada
 remote desktop.
 
-**62. Keadaan M2**
+**63. M5a — alias perangkat dan kata sandi tetap**
+
+Permintaan berikutnya: aplikasi Windows yang dipasang di mesin lain,
+menampilkan ID dan kata sandinya sendiri, dapat menggantinya, ikut organisasi
+yang terdaftar, dan meminta izin **sekali** lalu mengingat siapa yang boleh
+masuk — kebiasaan yang sudah dikenal orang dari UltraViewer dan AnyDesk.
+
+Dua bagian dari permintaan itu berbenturan dengan rancangan yang ada, dan
+keduanya diselesaikan ke arah yang sama dengan pilihan AnyDesk sendiri.
+
+**Nomor perangkat tetap tidak dapat diubah; yang ditambahkan adalah alias.**
+Nomor sembilan digit membawa check digit Damm, `sessions.device_id_snapshot`
+menyimpannya apa adanya supaya riwayat bertahan setelah perangkat dihapus, dan
+nomor yang dapat dipilih mengundang penyamaran — mengambil nomor mirip milik
+mesin lain agar orang salah menyambung. Alias menutup kebutuhan yang sebenarnya
+("ID yang mudah diingat") tanpa satu pun biaya itu.
+
+Aliasnya dibatasi ketat, dan setiap batasan punya sebabnya: huruf kecil saja
+supaya `PC-Kantor` dan `pc-kantor` tidak pernah menjadi dua perangkat, tanpa
+spasi karena alias dibacakan lewat telepon sama seperti nomor, dan **tidak
+boleh berupa sembilan digit** — tanpa larangan itu seseorang dapat mengambil
+alias yang persis sama dengan nomor perangkat orang lain, dan Quick Connect
+tidak akan pernah dapat memutuskan mana yang dimaksud.
+
+**Dua kata sandi, bukan satu.** Yang acak 40 bit dan berotasi setiap sesi tetap
+ada untuk bantuan sesaat yang dibacakan lewat telepon. Yang tetap dipilih
+manusia — dan manusia memilih buruk, jadi ia dijaga minimal 10 karakter,
+menolak daftar yang paling umum, dan menolak yang hanya berisi tiga karakter
+berbeda.
+
+Keduanya **selalu diperiksa**, bahkan setelah yang pertama cocok. Berhenti
+lebih awal membuat lama respons memberi tahu kata sandi mana yang benar, dan
+itu memberi penyerang cara memilah tebakannya. Lantai waktu 250 ms sudah
+menutupi biaya keduanya.
+
+Satu perbedaan halus yang disengaja: kata sandi sesi dinormalkan (huruf besar,
+tanpa spasi) karena ia dibacakan; kata sandi tetap **tidak**, karena ia dipilih
+manusia dan boleh memuat apa saja. Menormalkannya akan diam-diam mengubah apa
+yang pengguna ketik.
+
+**64. Endpoint swalayan**
+
+Tiga endpoint baru yang dipanggil dengan **token perangkat**, bukan sesi
+pengguna — inilah yang membuat aplikasi Windows dapat menampilkan dan mengubah
+identitasnya tanpa pemiliknya membuka dashboard.
+
+| Endpoint | Isi |
+|---|---|
+| `GET /devices/self` | nomor, alias, organisasi, status, apakah sandi tetap aktif |
+| `PUT /devices/self/handle` | memasang atau menghapus alias |
+| `PUT /devices/self/passwords` | merotasi sandi sesi, memasang atau menghapus sandi tetap |
+
+Perangkat hanya pernah dapat menyentuh dirinya sendiri: UUID diambil dari klaim
+token yang sudah diverifikasi, bukan dari badan permintaan, dan tenant selalu
+ikut menjadi syarat di sisi SQL.
+
+Sudah dapat dipakai lewat CLI sebelum GUI ada: `rdp-agent alias pc-kantor`,
+`rdp-agent sandi --tetap <SANDI>`, dan `rdp-agent status` yang kini menampilkan
+keadaan lokal **dan** keadaan menurut server. Bagian server sengaja tidak
+menggagalkan perintah saat jaringan mati — identitas lokal tetap berguna
+dilihat pada mesin yang sedang tidak terhubung.
+
+Terverifikasi di produksi: alias `pc-masamune` dan nomor `543 096 477`
+menunjuk perangkat yang sama, alias berspasi ditolak dengan pesan yang
+menjelaskan, kata sandi enam karakter ditolak, dan perubahannya tercatat di
+audit sebagai `device.set_handle`.
+
+**65. Dua bug uji, bukan bug kode**
+
+Uji perilaku migrasi melaporkan "hapus sandi tetap: GAGAL". Diperiksa terpisah,
+penghapusannya benar — `hash=NULL set_at=NULL` dan sandi sesi tidak tersentuh.
+Yang salah ujinya: SQL tidak menjamin urutan evaluasi antara pemanggilan fungsi
+dan subquery di sisi lain `AND`, sehingga subquery membaca keadaan sebelum
+fungsi berjalan.
+
+Uji unit `normalkan_kunci` gagal pada nomor `123456782` yang saya tulis tangan —
+check digit Damm sulit dihitung di kepala, dan vektor karangan itu memang tidak
+sah. Ujinya kini membangkitkan nomor lewat `DeviceId::generate()` alih-alih
+mengarangnya.
+
+**66. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

@@ -26,6 +26,24 @@ struct Galat {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Diri {
+    pub device_id: String,
+    pub device_id_tampil: String,
+    pub handle: Option<String>,
+    pub alias: Option<String>,
+    pub org_slug: String,
+    pub org_name: String,
+    pub punya_sandi_tetap: bool,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SandiResp {
+    pub session_password: Option<String>,
+    pub punya_sandi_tetap: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct IceServer {
     pub urls: Vec<String>,
@@ -120,6 +138,34 @@ impl Klien {
         self.kirim("/devices/token", &body, None).await
     }
 
+    /// `GET /devices/self` — ringkasan identitas perangkat ini.
+    pub async fn diri(&self, token: &str) -> Result<Diri> {
+        self.ambil("/devices/self", token).await
+    }
+
+    /// `PUT /devices/self/handle` — memasang atau menghapus alias.
+    pub async fn set_alias(&self, token: &str, alias: Option<&str>) -> Result<()> {
+        let _: serde_json::Value = self
+            .kirim_put("/devices/self/handle", &serde_json::json!({ "handle": alias }), token)
+            .await?;
+        Ok(())
+    }
+
+    /// `PUT /devices/self/passwords`.
+    pub async fn set_sandi(
+        &self,
+        token: &str,
+        rotasi_sesi: bool,
+        sandi_tetap: Option<&str>,
+    ) -> Result<SandiResp> {
+        self.kirim_put(
+            "/devices/self/passwords",
+            &serde_json::json!({ "rotasi_sesi": rotasi_sesi, "sandi_tetap": sandi_tetap }),
+            token,
+        )
+        .await
+    }
+
     /// `GET /turn-credentials`.
     ///
     /// Agent memerlukan relay sama seperti viewer. Tanpa ini, sesi akan gagal
@@ -150,6 +196,20 @@ impl Klien {
         if let Some(t) = token {
             req = req.bearer_auth(t);
         }
+        self.jalankan(req, path).await
+    }
+
+    async fn kirim_put<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+        token: &str,
+    ) -> Result<T> {
+        let req = self
+            .http
+            .put(format!("{}{path}", self.api_base))
+            .bearer_auth(token)
+            .json(body);
         self.jalankan(req, path).await
     }
 

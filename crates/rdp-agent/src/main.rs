@@ -38,6 +38,8 @@ fn main() -> Result<()> {
         "enrol" | "enroll" => jalankan_async(perintah_enrol(&argumen[1..])),
         "connect" => jalankan_async(perintah_connect(&argumen[1..])),
         "status" => perintah_status(),
+        "alias" => jalankan_async(perintah_alias(&argumen[1..])),
+        "sandi" => jalankan_async(perintah_sandi(&argumen[1..])),
         "--help" | "-h" | "help" => {
             bantuan();
             Ok(())
@@ -72,8 +74,15 @@ PERINTAH
   capture                Menangkap layar dan melaporkan hasilnya
   enrol --token <TOKEN>  Mendaftarkan mesin ini memakai token enrolment
   connect                Menyambung ke server dan tetap online
-  status                 Menampilkan identitas perangkat yang tersimpan
+  status                 Menampilkan identitas perangkat, lokal dan server
+  alias <NAMA>           Memberi alias yang mudah diingat (kosongkan: hapus)
+  sandi                  Mengubah kata sandi sesi atau kata sandi tetap
   help                   Menampilkan bantuan ini
+
+OPSI sandi
+  --rotasi               Membangkitkan kata sandi sesi acak yang baru
+  --tetap <SANDI>        Memasang kata sandi tetap untuk akses berulang
+  --hapus-tetap          Mematikan akses dengan kata sandi tetap
 
 OPSI enrol
   --token <TOKEN>        Token enrolment dari dashboard (wajib)
@@ -566,9 +575,105 @@ async fn perintah_connect(argumen: &[String]) -> Result<()> {
     signal::jalankan(konfig, kunci, atur).await
 }
 
+// ── swalayan ─────────────────────────────────────────────────────────────────
+
+/// Membuka klien beserta token perangkat yang segar.
+async fn sesi_swalayan() -> Result<(api::Klien, String, identitas::Konfigurasi)> {
+    let konfig = identitas::muat_konfig()?;
+    let kunci = identitas::muat_kunci()?;
+    let klien = api::Klien::baru(konfig.api_base())?;
+    let token = klien.token_perangkat(konfig.device_uuid, &kunci).await?;
+    Ok((klien, token.access_token, konfig))
+}
+
+async fn perintah_alias(argumen: &[String]) -> Result<()> {
+    let (klien, token, _) = sesi_swalayan().await?;
+
+    // Argumen pertama yang bukan opsi. Tanpa argumen berarti menghapus alias,
+    // dan itu perintah yang sah — bukan pemanggilan yang lupa isinya.
+    let baru = argumen.iter().find(|a| !a.starts_with("--"));
+
+    klien.set_alias(&token, baru.map(String::as_str)).await?;
+
+    match baru {
+        Some(a) => {
+            println!("\nAlias dipasang: {a}");
+            println!("Perangkat ini kini dapat dihubungi dengan alias itu maupun nomornya.");
+        }
+        None => println!("\nAlias dihapus. Perangkat hanya dapat dihubungi dengan nomornya."),
+    }
+    Ok(())
+}
+
+async fn perintah_sandi(argumen: &[String]) -> Result<()> {
+    let rotasi = argumen.iter().any(|a| a == "--rotasi");
+    let hapus = argumen.iter().any(|a| a == "--hapus-tetap");
+    let tetap = opsi(argumen, "--tetap");
+
+    if !rotasi && !hapus && tetap.is_none() {
+        bail!("sebutkan --rotasi, --tetap <SANDI>, atau --hapus-tetap");
+    }
+    if hapus && tetap.is_some() {
+        bail!("--tetap dan --hapus-tetap saling meniadakan");
+    }
+
+    let (klien, token, _) = sesi_swalayan().await?;
+    let sandi_tetap = if hapus { Some("") } else { tetap.as_deref() };
+    let hasil = klien.set_sandi(&token, rotasi, sandi_tetap).await?;
+
+    println!();
+    if let Some(p) = &hasil.session_password {
+        println!("  Kata sandi sesi baru   {p}");
+        println!("  Hanya ditampilkan sekali — catat sekarang.");
+    }
+    if hapus {
+        println!("  Kata sandi tetap       dihapus, akses berulang dimatikan");
+    } else if tetap.is_some() {
+        println!("  Kata sandi tetap       dipasang");
+        println!(
+            "\n  Kata sandi tetap tidak berotasi. Siapa pun yang mengetahuinya\n  \
+             dapat mengakses mesin ini sampai Anda menggantinya."
+        );
+    }
+    println!("\n  Sandi tetap aktif      {}", if hasil.punya_sandi_tetap { "ya" } else { "tidak" });
+    Ok(())
+}
+
 // ── status ───────────────────────────────────────────────────────────────────
 
 fn perintah_status() -> Result<()> {
+    tampilkan_status_lokal()?;
+
+    // Bagian dari server sengaja tidak menggagalkan perintah bila jaringan
+    // mati: identitas lokal tetap berguna dilihat saat mendiagnosis mesin yang
+    // sedang tidak terhubung.
+    if identitas::sudah_enrol() {
+        match jalankan_async(tampilkan_status_server()) {
+            Ok(()) => {}
+            Err(e) => println!("\n  (tidak dapat menghubungi server: {e})"),
+        }
+    }
+    Ok(())
+}
+
+async fn tampilkan_status_server() -> Result<()> {
+    let (klien, token, _) = sesi_swalayan().await?;
+    let d = klien.diri(&token).await?;
+
+    println!("\nMenurut server\n");
+    println!("  Device ID     {}", d.device_id_tampil);
+    println!("  Alias         {}", d.handle.as_deref().unwrap_or("— belum dipasang"));
+    println!("  Nama tampilan {}", d.alias.as_deref().unwrap_or("—"));
+    println!("  Organisasi    {} ({})", d.org_name, d.org_slug);
+    println!("  Status        {}", d.status);
+    println!(
+        "  Sandi tetap   {}",
+        if d.punya_sandi_tetap { "aktif" } else { "tidak aktif" }
+    );
+    Ok(())
+}
+
+fn tampilkan_status_lokal() -> Result<()> {
     if !identitas::sudah_enrol() {
         println!(
             "\nBelum ter-enrol.\n\n\
