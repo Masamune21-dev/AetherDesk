@@ -538,7 +538,48 @@ Selain itu ada 10 peringatan `No available ipv6 IP address found` dan
 berguna bagi agent. Tidak merusak apa pun, tetapi mengotori log yang kelak
 dipakai mendiagnosis kegagalan sungguhan.
 
-**53. Keadaan M2**
+**53. M3a — perpindahan monitor lewat DataChannel**
+
+`MONITOR_LAYOUT` dan `MONITOR_SELECT` berjalan di atas **DataChannel WebRTC**,
+bukan lewat Signal Server — NEXT_PLAN.md §8. Server tidak perlu tahu monitor
+mana yang sedang dilihat, dan menaruhnya di sana berarti setiap perpindahan
+menempuh perjalanan pulang-pergi lewat internet untuk keputusan yang sepenuhnya
+lokal bagi kedua ujung.
+
+**Monitor dirujuk dengan nama perangkat, bukan indeks.** Ini menutup catatan
+terbuka dari sesi 2: urutan `EnumDisplayMonitors` tidak dijanjikan stabil,
+sehingga mencabut satu layar menggeser indeks yang lain — dan viewer yang
+menyimpan indeks akan menunjuk layar yang salah tanpa satu pun galat muncul.
+Nama perangkat pun bukan jaminan mutlak, tetapi ia bertahan melewati kejadian
+yang lazim: layar dimatikan, kabel dicabut sementara.
+
+**Encoder dibuat ulang setiap perpindahan**, bukan dipakai lagi. Resolusi dan
+orientasi ikut berubah, dan encoder H.264 tidak dapat mengganti ukuran frame di
+tengah jalan. Membuatnya baru juga menghasilkan SPS, PPS, dan keyframe segar —
+persis yang dibutuhkan dekoder di seberang untuk menyusun ulang dirinya.
+
+**Perpindahan yang gagal tidak mematikan sesi.** Monitor lama tetap dipakai dan
+peringatan dicatat. Layar yang diminta mungkin baru saja dicabut, dan sesi yang
+sedang berjalan tidak pantas mati karenanya.
+
+Di sisi viewer, pemilih monitor **tersembunyi bila hanya ada satu layar** — satu
+tombol untuk satu-satunya pilihan hanya menambah bising. Tombolnya menampilkan
+ukuran, bukan `\\.\DISPLAY1`, karena nama perangkat Windows tidak berarti apa
+pun bagi pengguna.
+
+Agent berbasis browser tidak membuat kanal kendali sama sekali, sehingga
+pemilih monitor tetap tersembunyi di sana — dan itu memang benar, satu tab
+hanya punya satu aliran layar.
+
+**Belum dikerjakan dari M3:** track thumbnail beresolusi rendah untuk monitor
+yang tidak aktif (NEXT_PLAN.md §5.4). Tanpa itu perpindahan tetap bekerja,
+hanya saja pengguna memilih berdasarkan ukuran dan nomor, bukan berdasarkan
+gambar kecil yang hidup.
+
+**Belum terverifikasi:** perpindahan belum pernah dicoba dari viewer sungguhan.
+Kode terpasang di produksi dan agent berjalan; ujinya menunggu manusia.
+
+**54. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|

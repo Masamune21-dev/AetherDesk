@@ -68,6 +68,12 @@
       </div>
     </div>
 
+    <!-- Pemilih monitor. Tersembunyi sampai agent melaporkan lebih dari satu
+         layar — satu tombol untuk satu-satunya pilihan hanya menambah bising. -->
+    <div class="baris rapat" id="pilihMonitor" hidden>
+      <span class="kecil" style="margin-right:.25rem">Monitor</span>
+    </div>
+
     <div class="baris rapat">
       <button id="btnLayarPenuh" class="sekunder">Layar penuh</button>
       <button id="btnHud" class="sekunder">Sembunyikan statistik</button>
@@ -88,6 +94,43 @@ pasangHeader('/viewer');
 
 let signal = null;
 let kanal = null;
+let kontrol = null;
+
+/**
+ * Menggambar tombol pemilih monitor dari `MONITOR_LAYOUT`.
+ *
+ * Monitor dirujuk dengan nama perangkat, bukan indeks. Urutan enumerasi di
+ * sisi agent tidak dijanjikan stabil, sehingga mencabut satu layar akan
+ * menggeser indeks yang lain — dan tombol akan menunjuk monitor yang salah
+ * tanpa satu pun galat muncul.
+ */
+function gambarPilihMonitor({ monitors = [], active } = {}) {
+  const wadah = $('#pilihMonitor');
+  wadah.querySelectorAll('button').forEach((b) => b.remove());
+
+  if (monitors.length < 2) { wadah.hidden = true; return; }
+  wadah.hidden = false;
+
+  // Layout baru berarti perpindahan sudah selesai; pesan "berpindah…" yang
+  // tertinggal akan membuat sesi yang sehat terlihat menggantung.
+  status($('#statusSesi'), '', 'ok');
+
+  monitors.forEach((m, i) => {
+    const b = document.createElement('button');
+    b.className = m.name === active ? '' : 'sekunder';
+    // Nama perangkat Windows (`\\.\DISPLAY1`) tidak berarti apa pun bagi
+    // pengguna. Yang menolong justru ukuran dan penanda primer.
+    b.textContent = `${i + 1} · ${m.width}×${m.height}${m.is_primary ? ' ·' : ''}`;
+    b.title = `${m.name} pada (${m.x}, ${m.y})${m.is_primary ? ' — monitor primer' : ''}`;
+    b.disabled = m.name === active;
+    b.onclick = () => {
+      if (kontrol?.readyState !== 'open') return;
+      kontrol.send(JSON.stringify({ type: 'MONITOR_SELECT', payload: { name: m.name } }));
+      status($('#statusSesi'), `berpindah ke monitor ${i + 1}…`, 'wait');
+    };
+    wadah.appendChild(b);
+  });
+}
 let sessionId = null;
 let timerHud = null;
 let bytesTerakhir = 0, waktuTerakhir = 0;
@@ -169,6 +212,21 @@ $('#btnHubungkan').onclick = async () => {
     },
   });
 
+  // Kanal kendali dibuat agent, jadi viewer menunggunya. Agent berbasis
+  // browser tidak membuatnya sama sekali — pemilih monitor akan tetap
+  // tersembunyi di sana, dan itu memang benar: satu tab hanya punya satu
+  // aliran layar.
+  kanal.pc.ondatachannel = (ev) => {
+    if (ev.channel.label !== 'kontrol') return;
+    kontrol = ev.channel;
+    kontrol.onmessage = (m) => {
+      let pesan;
+      try { pesan = JSON.parse(m.data); } catch { return; }
+      if (pesan.type === 'MONITOR_LAYOUT') gambarPilihMonitor(pesan.payload);
+    };
+    kontrol.onclose = () => { kontrol = null; };
+  };
+
   kanal.pc.ontrack = (e) => {
     $('#layar').srcObject = e.streams[0];
     tampil($('#kartuConnect'), false);
@@ -242,8 +300,12 @@ function bersihkan() {
   clearInterval(timerHud);
   kanal?.tutup(); kanal = null;
   signal?.tutup(); signal = null;
+  kontrol = null;
   sessionId = null;
   $('#layar').srcObject = null;
+  // Pemilih monitor milik sesi, bukan milik halaman. Tombol yang tertinggal
+  // dari sesi sebelumnya akan menunjuk perangkat yang sudah tidak terhubung.
+  gambarPilihMonitor({ monitors: [] });
   tampil($('#kartuSesi'), false);
   tampil($('#kartuConnect'), true);
   $('#wadah').classList.remove('lebar');

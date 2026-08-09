@@ -63,10 +63,60 @@ impl Default for Pengaturan {
     }
 }
 
+/// Perintah untuk thread capture.
+#[derive(Debug)]
+enum Perintah {
+    /// Berpindah ke monitor lain, dirujuk dengan nama perangkat GDI.
+    Ganti(String),
+}
+
 /// Satu sesi media yang sedang berjalan.
 pub struct SesiMedia {
     pc: Arc<RTCPeerConnection>,
     berhenti: Arc<AtomicBool>,
+    /// Monitor yang sedang dibagikan. Ditulis thread capture, dibaca sisi
+    /// async saat menyusun `MONITOR_LAYOUT`.
+    aktif: Arc<std::sync::Mutex<String>>,
+    /// Dipegang hanya agar channel tetap hidup selama sesi. Menjatuhkannya
+    /// akan membuat thread capture melihat pengirim hilang.
+    _tx_cmd: std::sync::mpsc::Sender<Perintah>,
+}
+
+/// Menyusun pesan `MONITOR_LAYOUT`.
+///
+/// Monitor dirujuk dengan **nama perangkat**, bukan indeks dalam daftar.
+/// Urutan `EnumDisplayMonitors` tidak dijanjikan stabil, sehingga mencabut satu
+/// monitor akan menggeser indeks yang lain — dan viewer yang menyimpan indeks
+/// akan menunjuk layar yang salah tanpa satu pun galat muncul.
+///
+/// Nama perangkat pun bukan jaminan mutlak: Windows dapat menomori ulang
+/// setelah perubahan perangkat keras. Tetapi ia bertahan melewati kejadian
+/// yang lazim — layar dimatikan, kabel dicabut sementara — dan itu selisih
+/// yang menentukan dalam pemakaian sehari-hari.
+fn pesan_layout(aktif: &str) -> Option<String> {
+    let monitors = crate::monitor::enumerasi().ok()?;
+    let daftar: Vec<_> = monitors
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "name": m.name,
+                "x": m.x,
+                "y": m.y,
+                "width": m.width,
+                "height": m.height,
+                "is_primary": m.is_primary,
+                "scale_percent": m.scale_percent,
+            })
+        })
+        .collect();
+
+    Some(
+        serde_json::json!({
+            "type": "MONITOR_LAYOUT",
+            "payload": { "monitors": daftar, "active": aktif },
+        })
+        .to_string(),
+    )
 }
 
 impl std::fmt::Debug for SesiMedia {
@@ -152,6 +202,72 @@ impl SesiMedia {
         }));
 
         let berhenti = Arc::new(AtomicBool::new(false));
+        let aktif = Arc::new(std::sync::Mutex::new(String::new()));
+        let (tx_cmd, rx_cmd) = std::sync::mpsc::channel::<Perintah>();
+        // Pemberitahuan dari thread capture bahwa monitor aktif berubah.
+        let (tx_ubah, mut rx_ubah) = tokio::sync::mpsc::unbounded_channel::<()>();
+
+        // ── Kanal kendali ───────────────────────────────────────────────────
+        //
+        // NEXT_PLAN.md §8: perpindahan monitor lewat DataChannel, bukan lewat
+        // server. Server tidak perlu tahu monitor mana yang sedang dilihat, dan
+        // menaruhnya di sana berarti setiap perpindahan menempuh perjalanan
+        // pulang-pergi lewat internet untuk keputusan yang sepenuhnya lokal
+        // bagi kedua ujung.
+        let dc = pc
+            .create_data_channel("kontrol", None)
+            .await
+            .context("gagal membuat kanal kendali")?;
+
+        let dc_buka = Arc::clone(&dc);
+        let aktif_buka = Arc::clone(&aktif);
+        dc.on_open(Box::new(move || {
+            let dc = Arc::clone(&dc_buka);
+            let aktif = Arc::clone(&aktif_buka);
+            Box::pin(async move {
+                let nama = aktif.lock().map(|g| g.clone()).unwrap_or_default();
+                if let Some(p) = pesan_layout(&nama) {
+                    let _ = dc.send_text(p).await;
+                }
+            })
+        }));
+
+        let tx_cmd_pesan = tx_cmd.clone();
+        dc.on_message(Box::new(move |msg| {
+            let tx = tx_cmd_pesan.clone();
+            Box::pin(async move {
+                let Ok(teks) = String::from_utf8(msg.data.to_vec()) else {
+                    return;
+                };
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(&teks) else {
+                    return;
+                };
+                if v.get("type").and_then(|t| t.as_str()) != Some("MONITOR_SELECT") {
+                    return;
+                }
+                let Some(nama) = v
+                    .get("payload")
+                    .and_then(|p| p.get("name"))
+                    .and_then(|n| n.as_str())
+                else {
+                    return;
+                };
+                tracing::info!(monitor = nama, "viewer meminta pindah monitor");
+                let _ = tx.send(Perintah::Ganti(nama.to_string()));
+            })
+        }));
+
+        // Meneruskan perubahan monitor aktif ke viewer.
+        let dc_ubah = Arc::clone(&dc);
+        let aktif_ubah = Arc::clone(&aktif);
+        tokio::spawn(async move {
+            while rx_ubah.recv().await.is_some() {
+                let nama = aktif_ubah.lock().map(|g| g.clone()).unwrap_or_default();
+                if let Some(p) = pesan_layout(&nama) {
+                    let _ = dc_ubah.send_text(p).await;
+                }
+            }
+        });
 
         let henti_status = Arc::clone(&berhenti);
         pc.on_peer_connection_state_change(Box::new(move |keadaan| {
@@ -174,11 +290,20 @@ impl SesiMedia {
         let (tx_siap, rx_siap) = std::sync::mpsc::channel::<std::result::Result<(), String>>();
         let henti_thread = Arc::clone(&berhenti);
         let atur_thread = atur.clone();
+        let aktif_thread = Arc::clone(&aktif);
 
         std::thread::Builder::new()
             .name("aetherdesk-capture".into())
             .spawn(move || {
-                jalankan_capture(atur_thread, tx_au, tx_siap, henti_thread);
+                jalankan_capture(
+                    atur_thread,
+                    tx_au,
+                    tx_siap,
+                    henti_thread,
+                    rx_cmd,
+                    aktif_thread,
+                    tx_ubah,
+                );
             })
             .context("gagal membuat thread capture")?;
 
@@ -232,7 +357,20 @@ impl SesiMedia {
             .await
             .context("gagal menetapkan deskripsi lokal")?;
 
-        Ok((Self { pc, berhenti }, offer.sdp))
+        Ok((
+            Self {
+                pc,
+                berhenti,
+                aktif,
+                _tx_cmd: tx_cmd,
+            },
+            offer.sdp,
+        ))
+    }
+
+    /// Monitor yang sedang dibagikan.
+    pub fn monitor_aktif(&self) -> String {
+        self.aktif.lock().map(|g| g.clone()).unwrap_or_default()
     }
 
     /// Menerima SDP answer dari viewer.
@@ -277,20 +415,32 @@ impl SesiMedia {
     }
 }
 
+/// Membuka capture beserta encoder yang sepadan dengan ukurannya.
+fn buka_pasangan(
+    monitor: Option<&str>,
+    atur: &Pengaturan,
+) -> Result<(capture::Duplikasi, encode::H264)> {
+    let dup = capture::Duplikasi::buka(monitor)?;
+    // Encoder dibuat ulang setiap kali monitor berpindah, bukan dipakai lagi.
+    // Resolusi dan orientasi ikut berubah, dan encoder H.264 tidak dapat
+    // mengganti ukuran frame di tengah jalan. Membuat yang baru juga
+    // menghasilkan SPS, PPS, dan keyframe segar — persis yang dibutuhkan
+    // dekoder di seberang untuk menyusun ulang dirinya.
+    let enc = encode::H264::baru(dup.width, dup.height, atur.fps, atur.bitrate)?;
+    Ok((dup, enc))
+}
+
 /// Perulangan capture dan encode. Berjalan pada thread sendiri.
 fn jalankan_capture(
     atur: Pengaturan,
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     tx_siap: std::sync::mpsc::Sender<std::result::Result<(), String>>,
     berhenti: Arc<AtomicBool>,
+    rx_cmd: std::sync::mpsc::Receiver<Perintah>,
+    aktif: Arc<std::sync::Mutex<String>>,
+    tx_ubah: tokio::sync::mpsc::UnboundedSender<()>,
 ) {
-    let siap = (|| -> Result<(capture::Duplikasi, encode::H264)> {
-        let dup = capture::Duplikasi::buka(atur.monitor.as_deref())?;
-        let enc = encode::H264::baru(dup.width, dup.height, atur.fps, atur.bitrate)?;
-        Ok((dup, enc))
-    })();
-
-    let (mut dup, mut enc) = match siap {
+    let (mut dup, mut enc) = match buka_pasangan(atur.monitor.as_deref(), &atur) {
         Ok(v) => {
             let _ = tx_siap.send(Ok(()));
             v
@@ -300,6 +450,14 @@ fn jalankan_capture(
             return;
         }
     };
+
+    let mut catat_aktif = |nama: &str| {
+        if let Ok(mut g) = aktif.lock() {
+            *g = nama.to_string();
+        }
+        let _ = tx_ubah.send(());
+    };
+    catat_aktif(&dup.nama_output);
 
     tracing::info!(
         monitor = %dup.nama_output,
@@ -314,6 +472,40 @@ fn jalankan_capture(
     let mut terakhir: Option<capture::Frame> = None;
 
     while !berhenti.load(Ordering::Relaxed) {
+        // Perintah diperiksa lebih dulu supaya perpindahan monitor terasa
+        // seketika, bukan menunggu satu siklus frame lagi.
+        while let Ok(perintah) = rx_cmd.try_recv() {
+            let Perintah::Ganti(nama) = perintah;
+            if nama == dup.nama_output {
+                continue;
+            }
+            match buka_pasangan(Some(&nama), &atur) {
+                Ok((d, e)) => {
+                    tracing::info!(
+                        dari = %dup.nama_output,
+                        ke = %d.nama_output,
+                        ukuran = %format!("{}×{}", d.width, d.height),
+                        "monitor berpindah"
+                    );
+                    dup = d;
+                    enc = e;
+                    terakhir = None;
+                    berikutnya = std::time::Instant::now();
+                    catat_aktif(&dup.nama_output);
+                }
+                Err(e) => {
+                    // Monitor lama tetap dipakai. Sesi yang berjalan tidak
+                    // boleh mati hanya karena permintaan pindah gagal —
+                    // monitornya mungkin baru saja dicabut.
+                    tracing::warn!(
+                        monitor = %nama,
+                        error = %format!("{e:#}"),
+                        "gagal pindah monitor, tetap pada yang lama"
+                    );
+                }
+            }
+        }
+
         match dup.ambil(5) {
             Ok(Some(f)) => terakhir = Some(f),
             Ok(None) => {}
