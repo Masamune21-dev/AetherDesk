@@ -13,6 +13,18 @@ rdp-core = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
+
+# WebRTC murni Rust. Satu-satunya jalan mengirim media ke browser tanpa
+# menyeret libwebrtc beserta rantai build C++-nya — dan browser adalah viewer
+# yang sudah berjalan di produksi, jadi ia yang menentukan protokolnya.
+#
+# Dipatok ke 0.14, bukan 0.20. Rilis 0.20 adalah penulisan ulang di atas inti
+# Sans-I/O dengan API yang jauh lebih rendah tingkatnya — `TrackLocalStaticSample`
+# di sana menuntut `MediaStreamTrack` yang SSRC dan codec-nya disusun sendiri.
+# Rancangannya menarik, tetapi mempelajarinya sambil mengejar frame pertama
+# menambah satu variabel yang tidak perlu. 0.14 adalah rilis klasik terakhir,
+# dan itu yang dipakai hampir seluruh contoh yang ada.
+webrtc = "0.14"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 serde = { workspace = true }

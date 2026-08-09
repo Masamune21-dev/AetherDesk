@@ -26,6 +26,18 @@ struct Galat {
     message: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct IceServer {
+    pub urls: Vec<String>,
+    pub username: Option<String>,
+    pub credential: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KredensialResp {
+    ice_servers: Vec<IceServer>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EnrolResp {
     pub device_uuid: Uuid,
@@ -108,6 +120,16 @@ impl Klien {
         self.kirim("/devices/token", &body, None).await
     }
 
+    /// `GET /turn-credentials`.
+    ///
+    /// Agent memerlukan relay sama seperti viewer. Tanpa ini, sesi akan gagal
+    /// tepat pada jaringan yang paling membutuhkannya — di belakang Symmetric
+    /// NAT, yang secara industri mencakup 10–20% kasus.
+    pub async fn turn_credentials(&self, token: &str) -> Result<Vec<IceServer>> {
+        let resp: KredensialResp = self.ambil("/turn-credentials", token).await?;
+        Ok(resp.ice_servers)
+    }
+
     /// `POST /devices/heartbeat`.
     pub async fn heartbeat(&self, token: &str, hostname: Option<&str>) -> Result<()> {
         let body = serde_json::json!({
@@ -128,7 +150,22 @@ impl Klien {
         if let Some(t) = token {
             req = req.bearer_auth(t);
         }
+        self.jalankan(req, path).await
+    }
 
+    async fn ambil<T: serde::de::DeserializeOwned>(&self, path: &str, token: &str) -> Result<T> {
+        let req = self
+            .http
+            .get(format!("{}{path}", self.api_base))
+            .bearer_auth(token);
+        self.jalankan(req, path).await
+    }
+
+    async fn jalankan<T: serde::de::DeserializeOwned>(
+        &self,
+        req: reqwest::RequestBuilder,
+        path: &str,
+    ) -> Result<T> {
         let resp = req
             .send()
             .await

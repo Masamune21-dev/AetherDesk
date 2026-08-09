@@ -105,6 +105,39 @@ impl FromRequestParts<AppState> for PerangkatTerautentikasi {
     }
 }
 
+/// Ekstraktor untuk endpoint yang melayani **keduanya**.
+///
+/// Sengaja langka. Sebagian besar endpoint memang milik salah satu pihak saja,
+/// dan memisahkannya adalah yang menahan perangkat tersusupi agar tidak menjadi
+/// pijakan ke seluruh organisasi.
+///
+/// Kredensial TURN adalah pengecualian yang sah: relay dibutuhkan oleh **kedua
+/// ujung** sebuah sesi, dan agent yang tidak dapat memperolehnya akan gagal
+/// tepat pada jaringan yang paling membutuhkannya.
+#[derive(Debug, Clone)]
+pub struct SubjekTerautentikasi {
+    pub org_id: Uuid,
+    /// User id, atau device uuid bila pemanggilnya perangkat.
+    pub subjek: Uuid,
+    pub adalah_perangkat: bool,
+}
+
+impl FromRequestParts<AppState> for SubjekTerautentikasi {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let claims = klaim_dari_header(parts, state)?;
+        Ok(Self {
+            org_id: claims.org_id(),
+            subjek: claims.sub,
+            adalah_perangkat: claims.adalah_perangkat(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

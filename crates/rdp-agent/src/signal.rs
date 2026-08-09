@@ -1,20 +1,22 @@
-//! Koneksi ke Signal Server.
+//! Koneksi ke Signal Server, dan siklus hidup sesi media.
 //!
-//! Menutup bagian terakhir M1: agent hadir di dashboard sebagai perangkat
-//! online, dan Quick Connect dapat menemukannya.
+//! Menutup M1 sekaligus M2c: agent hadir di dashboard sebagai perangkat online,
+//! dan ketika viewer meminta koneksi, ia benar-benar menyerahkan layarnya.
 //!
-//! Yang **belum** ada adalah capture (M2). Karena itu permintaan sesi yang
-//! masuk ditolak dengan alasan yang jelas, bukan didiamkan — viewer yang
-//! menunggu tanpa jawaban jauh lebih membingungkan daripada penolakan yang
-//! menyebutkan sebabnya.
+//! Signaling, TURN, persetujuan, dan siklus hidup sesi di sisi server tidak
+//! disentuh. Agent native menggantikan **satu ujung** dari koneksi yang sudah
+//! bekerja — NEXT_PLAN.md §11.
 
-use crate::{api::Klien, identitas::Konfigurasi};
+use crate::{api::Klien, identitas::Konfigurasi, rtc};
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use rdp_core::DeviceKeypair;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
+use uuid::Uuid;
+use webrtc::ice_transport::ice_server::RTCIceServer;
 
 const BACKOFF_AWAL: Duration = Duration::from_secs(1);
 const BACKOFF_MAKS: Duration = Duration::from_secs(30);
@@ -27,13 +29,8 @@ const BACKOFF_MAKS: Duration = Duration::from_secs(30);
 const JARAK_HEARTBEAT: Duration = Duration::from_secs(60);
 
 /// Ambang penyegaran token, dihitung mundur dari kedaluwarsanya.
-///
-/// Token diperbarui saat tersisa dua menit, bukan saat sudah kedaluwarsa.
-/// Menunggu sampai gagal berarti setiap siklus token menghasilkan satu
-/// heartbeat yang hilang.
 const AMBANG_SEGAR: i64 = 120;
 
-/// Token perangkat beserta umurnya.
 struct Token {
     nilai: String,
     diperoleh: Instant,
@@ -59,12 +56,16 @@ async fn ambil_token(klien: &Klien, konfig: &Konfigurasi, kunci: &DeviceKeypair)
 }
 
 /// Menjalankan agent sampai dihentikan.
-pub async fn jalankan(konfig: Konfigurasi, kunci: DeviceKeypair) -> Result<()> {
+pub async fn jalankan(
+    konfig: Konfigurasi,
+    kunci: DeviceKeypair,
+    atur: rtc::Pengaturan,
+) -> Result<()> {
     let klien = Klien::baru(konfig.api_base())?;
     let mut jeda = BACKOFF_AWAL;
 
     loop {
-        match satu_sesi(&klien, &konfig, &kunci).await {
+        match satu_sesi(&klien, &konfig, &kunci, &atur).await {
             Ok(()) => {
                 tracing::warn!("koneksi signaling tertutup, menyambung ulang");
                 // Koneksi yang sempat berdiri berarti servernya sehat; jangan
@@ -72,7 +73,7 @@ pub async fn jalankan(konfig: Konfigurasi, kunci: DeviceKeypair) -> Result<()> {
                 // membengkak dari kegagalan lama.
                 jeda = BACKOFF_AWAL;
             }
-            Err(e) => tracing::error!(error = %e, "sesi signaling gagal"),
+            Err(e) => tracing::error!(error = %format!("{e:#}"), "sesi signaling gagal"),
         }
 
         tracing::info!(detik = jeda.as_secs(), "menunggu sebelum mencoba lagi");
@@ -81,7 +82,18 @@ pub async fn jalankan(konfig: Konfigurasi, kunci: DeviceKeypair) -> Result<()> {
     }
 }
 
-async fn satu_sesi(klien: &Klien, konfig: &Konfigurasi, kunci: &DeviceKeypair) -> Result<()> {
+/// Sesi media yang sedang berjalan, bila ada.
+struct Aktif {
+    session_id: Uuid,
+    media: rtc::SesiMedia,
+}
+
+async fn satu_sesi(
+    klien: &Klien,
+    konfig: &Konfigurasi,
+    kunci: &DeviceKeypair,
+    atur: &rtc::Pengaturan,
+) -> Result<()> {
     let mut token = ambil_token(klien, konfig, kunci).await?;
 
     let url = konfig.ws_url();
@@ -92,8 +104,19 @@ async fn satu_sesi(klien: &Klien, konfig: &Konfigurasi, kunci: &DeviceKeypair) -
 
     let (mut tulis, mut baca) = ws.split();
 
-    // AUTH wajib menjadi pesan pertama. `device_uuid` sengaja tetap dikirim
-    // meskipun token sudah memuatnya — server memeriksa keduanya cocok, dan
+    // Kredensial TURN diambil sekarang, bukan saat sesi pertama diminta.
+    // Relay yang tidak terkonfigurasi adalah kesalahan penyiapan, dan
+    // menemukannya saat agent dinyalakan jauh lebih baik daripada menemukannya
+    // ketika seseorang sedang menunggu layar muncul.
+    let ice = ambil_ice(klien, &token.nilai).await;
+
+    // Satu antrean keluar untuk semuanya. Kandidat ICE ditemukan di dalam
+    // callback WebRTC yang tidak memegang socket, jadi ia perlu jalan pulang
+    // yang tidak melibatkan kunci bersama.
+    let (tx_keluar, mut rx_keluar) = mpsc::unbounded_channel::<String>();
+
+    // AUTH wajib menjadi pesan pertama. `device_uuid` tetap dikirim meskipun
+    // token sudah memuatnya — server memeriksa keduanya cocok, dan
     // ketidakcocokan berarti konfigurasi lokal sudah menyimpang dari identitas
     // yang sebenarnya dipegang.
     tulis
@@ -111,25 +134,27 @@ async fn satu_sesi(klien: &Klien, konfig: &Konfigurasi, kunci: &DeviceKeypair) -
     let mut detak = tokio::time::interval(JARAK_HEARTBEAT);
     detak.tick().await; // tick pertama selesai seketika
 
+    let mut aktif: Option<Aktif> = None;
+
     loop {
         tokio::select! {
             pesan = baca.next() => {
-                let Some(pesan) = pesan else {
-                    return Ok(()); // socket tertutup dari sisi server
-                };
+                let Some(pesan) = pesan else { break };
                 match pesan.context("kesalahan membaca WebSocket")? {
                     Message::Text(t) => {
-                        if let Some(balasan) = tangani(&t, konfig) {
-                            tulis.send(Message::Text(balasan.into())).await?;
-                        }
+                        tangani(&t, konfig, atur, &ice, &tx_keluar, &mut aktif).await;
                     }
                     Message::Close(c) => {
                         tracing::warn!(?c, "server menutup koneksi");
-                        return Ok(());
+                        break;
                     }
                     Message::Ping(p) => tulis.send(Message::Pong(p)).await?,
                     _ => {}
                 }
+            }
+
+            Some(keluar) = rx_keluar.recv() => {
+                tulis.send(Message::Text(keluar.into())).await?;
             }
 
             _ = detak.tick() => {
@@ -149,12 +174,29 @@ async fn satu_sesi(klien: &Klien, konfig: &Konfigurasi, kunci: &DeviceKeypair) -
             }
         }
     }
+
+    if let Some(a) = aktif {
+        a.media.tutup().await;
+    }
+    Ok(())
 }
 
-/// Menangani satu pesan dari server. Mengembalikan balasan bila ada.
-fn tangani(teks: &str, konfig: &Konfigurasi) -> Option<String> {
-    let pesan: Value = serde_json::from_str(teks).ok()?;
-    let tipe = pesan.get("type")?.as_str()?;
+/// Menangani satu pesan dari server.
+async fn tangani(
+    teks: &str,
+    konfig: &Konfigurasi,
+    atur: &rtc::Pengaturan,
+    ice: &[RTCIceServer],
+    tx: &mpsc::UnboundedSender<String>,
+    aktif: &mut Option<Aktif>,
+) {
+    let Ok(pesan) = serde_json::from_str::<Value>(teks) else {
+        tracing::debug!("pesan bukan JSON");
+        return;
+    };
+    let Some(tipe) = pesan.get("type").and_then(|v| v.as_str()) else {
+        return;
+    };
     let payload = pesan.get("payload");
 
     match tipe {
@@ -163,30 +205,100 @@ fn tangani(teks: &str, konfig: &Konfigurasi) -> Option<String> {
                 device_id = %konfig.device_id,
                 "terautentikasi sebagai agent — perangkat kini online"
             );
-            None
         }
 
-        "PING" => Some(json!({ "type": "PONG" }).to_string()),
+        "PING" => {
+            let _ = tx.send(json!({ "type": "PONG" }).to_string());
+        }
 
-        // M2 belum ada. Menolak dengan alasan yang tertulis jauh lebih baik
-        // daripada mendiamkan viewer sampai kehabisan waktu.
         "SESSION_OFFER" => {
-            let session_id = payload?.get("session_id")?.clone();
+            let Some(sid) = ambil_uuid(payload, "session_id") else {
+                tracing::warn!("SESSION_OFFER tanpa session_id");
+                return;
+            };
             let peminta = payload
                 .and_then(|p| p.get("viewer_email"))
                 .and_then(|v| v.as_str())
-                .unwrap_or("tidak diketahui");
-            tracing::warn!(%peminta, "permintaan sesi ditolak — capture belum ada (M2)");
-            Some(
-                json!({
-                    "type": "SESSION_REJECT",
-                    "payload": {
-                        "session_id": session_id,
-                        "reason": "agent native belum mendukung berbagi layar (M2)",
-                    },
-                })
-                .to_string(),
-            )
+                .unwrap_or("tidak diketahui")
+                .to_string();
+
+            // Satu sesi pada satu waktu. Sesi kedua akan berebut capture yang
+            // sama, dan Desktop Duplication hanya boleh dipegang satu pihak.
+            if let Some(lama) = aktif.take() {
+                tracing::info!(sesi_lama = %lama.session_id, "sesi lama ditutup");
+                lama.media.tutup().await;
+            }
+
+            match rtc::SesiMedia::mulai(ice.to_vec(), atur.clone(), tx.clone(), sid).await {
+                Ok((media, sdp)) => {
+                    tracing::info!(%sid, %peminta, "sesi diterima, offer dikirim");
+                    let _ = tx.send(
+                        json!({ "type": "SESSION_ACCEPT", "payload": { "session_id": sid } })
+                            .to_string(),
+                    );
+                    let _ = tx.send(
+                        json!({
+                            "type": "SDP_OFFER",
+                            "payload": { "session_id": sid, "sdp": sdp },
+                        })
+                        .to_string(),
+                    );
+                    *aktif = Some(Aktif { session_id: sid, media });
+                }
+                Err(e) => {
+                    // Menolak dengan alasan tertulis, bukan mendiamkan. Viewer
+                    // yang menunggu tanpa jawaban jauh lebih membingungkan
+                    // daripada penolakan yang menyebut sebabnya.
+                    tracing::error!(%sid, error = %format!("{e:#}"), "gagal memulai media");
+                    let _ = tx.send(
+                        json!({
+                            "type": "SESSION_REJECT",
+                            "payload": {
+                                "session_id": sid,
+                                "reason": format!("agent gagal memulai capture: {e}"),
+                            },
+                        })
+                        .to_string(),
+                    );
+                }
+            }
+        }
+
+        "SDP_ANSWER" => {
+            let Some(sdp) = payload.and_then(|p| p.get("sdp")).and_then(|v| v.as_str()) else {
+                return;
+            };
+            match aktif.as_ref() {
+                Some(a) if cocok(payload, a.session_id) => {
+                    if let Err(e) = a.media.jawaban(sdp).await {
+                        tracing::error!(error = %format!("{e:#}"), "SDP answer ditolak");
+                    } else {
+                        tracing::info!(sid = %a.session_id, "SDP answer diterima");
+                    }
+                }
+                _ => tracing::warn!("SDP answer untuk sesi yang tidak aktif"),
+            }
+        }
+
+        "ICE_CANDIDATE" => {
+            let Some(k) = payload.and_then(|p| p.get("candidate")) else {
+                return;
+            };
+            match aktif.as_ref() {
+                Some(a) if cocok(payload, a.session_id) => {
+                    if let Err(e) = a.media.kandidat(k).await {
+                        tracing::debug!(error = %e, "kandidat ICE ditolak");
+                    }
+                }
+                _ => tracing::debug!("kandidat ICE untuk sesi yang tidak aktif"),
+            }
+        }
+
+        "SESSION_END" => {
+            if let Some(a) = aktif.take() {
+                tracing::info!(sid = %a.session_id, "sesi diakhiri");
+                a.media.tutup().await;
+            }
         }
 
         "ERROR" => {
@@ -199,70 +311,69 @@ fn tangani(teks: &str, konfig: &Konfigurasi) -> Option<String> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             tracing::error!(kode, pesan = pesan_galat, "server menolak");
-            None
         }
 
-        lain => {
-            tracing::debug!(tipe = lain, "pesan tidak ditangani");
-            None
+        lain => tracing::debug!(tipe = lain, "pesan tidak ditangani"),
+    }
+}
+
+/// Mengambil daftar server ICE, dengan STUN publik sebagai jaring terakhir.
+async fn ambil_ice(klien: &Klien, token: &str) -> Vec<RTCIceServer> {
+    match klien.turn_credentials(token).await {
+        Ok(daftar) => {
+            let ice = ubah_ice(daftar);
+            let relay = ice.iter().any(|s| s.urls.iter().any(|u| u.starts_with("turn:")));
+            if relay {
+                tracing::info!(server = ice.len(), "kredensial TURN diperoleh, relay tersedia");
+            } else {
+                // Jaringan di belakang Symmetric NAT — secara industri 10–20%
+                // kasus — tidak akan pernah tersambung tanpa relay. Pantas
+                // terlihat sejak sekarang, bukan sebagai kegagalan misterius
+                // pada sesi pertama.
+                tracing::warn!("server ICE tidak memuat relay TURN; NAT ketat akan gagal");
+            }
+            ice
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "kredensial TURN tidak diperoleh, hanya STUN publik");
+            vec![RTCIceServer {
+                urls: vec!["stun:stun.l.google.com:19302".to_owned()],
+                ..Default::default()
+            }]
         }
     }
+}
+
+fn ubah_ice(daftar: Vec<crate::api::IceServer>) -> Vec<RTCIceServer> {
+    daftar
+        .into_iter()
+        .map(|s| RTCIceServer {
+            urls: s.urls,
+            username: s.username.unwrap_or_default(),
+            credential: s.credential.unwrap_or_default(),
+        })
+        .collect()
+}
+
+fn ambil_uuid(payload: Option<&Value>, kunci: &str) -> Option<Uuid> {
+    payload
+        .and_then(|p| p.get(kunci))
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
+}
+
+/// Apakah pesan ini memang untuk sesi yang sedang aktif.
+///
+/// Server sudah memeriksa keanggotaan sesi, tetapi memeriksanya lagi di sini
+/// murah dan menutup kelas bug yang berbeda: pesan yang tiba terlambat dari
+/// sesi sebelumnya, yang akan merusak sesi yang baru saja dimulai.
+fn cocok(payload: Option<&Value>, sid: Uuid) -> bool {
+    ambil_uuid(payload, "session_id") == Some(sid)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
-
-    fn konfig() -> Konfigurasi {
-        Konfigurasi {
-            device_uuid: Uuid::nil(),
-            device_id: "123456789".into(),
-            server: "https://a.test".into(),
-        }
-    }
-
-    #[test]
-    fn ping_dibalas_pong() {
-        let b = tangani(r#"{"type":"PING"}"#, &konfig()).unwrap();
-        assert!(b.contains(r#""type":"PONG""#), "{b}");
-    }
-
-    #[test]
-    fn session_offer_ditolak_dengan_alasan() {
-        let masuk = r#"{"type":"SESSION_OFFER","payload":{
-            "session_id":"11111111-1111-1111-1111-111111111111",
-            "viewer_name":"A","viewer_email":"a@b.c","viewer_ip":"1.2.3.4"}}"#;
-        let b = tangani(masuk, &konfig()).unwrap();
-        assert!(b.contains("SESSION_REJECT"), "{b}");
-        // session_id wajib ikut, kalau tidak server tidak tahu sesi mana yang
-        // ditolak dan viewer tetap menunggu.
-        assert!(b.contains("11111111-1111-1111-1111-111111111111"), "{b}");
-        assert!(b.contains("M2"), "alasan penolakan tidak menyebutkan sebabnya: {b}");
-    }
-
-    #[test]
-    fn auth_ok_tidak_perlu_balasan() {
-        let m = r#"{"type":"AUTH_OK","payload":{"role":"agent",
-                    "user_id":"00000000-0000-0000-0000-000000000000",
-                    "org_id":"00000000-0000-0000-0000-000000000000"}}"#;
-        assert!(tangani(m, &konfig()).is_none());
-    }
-
-    #[test]
-    fn pesan_cacat_tidak_menjatuhkan_agent() {
-        // Seluruh masukan ini datang dari jaringan.
-        for buruk in [
-            "",
-            "bukan json",
-            "{}",
-            r#"{"type":123}"#,
-            r#"{"type":"SESSION_OFFER"}"#,
-            r#"{"type":"SESSION_OFFER","payload":{}}"#,
-        ] {
-            assert!(tangani(buruk, &konfig()).is_none(), "gagal pada: {buruk}");
-        }
-    }
 
     #[test]
     fn token_disegarkan_sebelum_kedaluwarsa() {
@@ -290,5 +401,58 @@ mod tests {
             j = (j * 2).min(BACKOFF_MAKS);
         }
         assert_eq!(j, BACKOFF_MAKS, "backoff tumbuh tanpa batas");
+    }
+
+    #[test]
+    fn session_id_terbaca_dari_payload() {
+        let p = json!({ "session_id": "11111111-1111-1111-1111-111111111111" });
+        assert_eq!(
+            ambil_uuid(Some(&p), "session_id").map(|u| u.to_string()),
+            Some("11111111-1111-1111-1111-111111111111".to_string())
+        );
+    }
+
+    #[test]
+    fn session_id_cacat_tidak_menjatuhkan_agent() {
+        for buruk in [json!({}), json!({ "session_id": 5 }), json!({ "session_id": "bukan-uuid" })]
+        {
+            assert_eq!(ambil_uuid(Some(&buruk), "session_id"), None);
+        }
+        assert_eq!(ambil_uuid(None, "session_id"), None);
+    }
+
+    #[test]
+    fn pesan_dari_sesi_lama_ditolak() {
+        // Jawaban atau kandidat yang tiba terlambat dari sesi sebelumnya tidak
+        // boleh merusak sesi yang baru dimulai.
+        let sekarang = Uuid::new_v4();
+        let lama = json!({ "session_id": Uuid::new_v4().to_string() });
+        assert!(!cocok(Some(&lama), sekarang));
+
+        let benar = json!({ "session_id": sekarang.to_string() });
+        assert!(cocok(Some(&benar), sekarang));
+    }
+
+    #[test]
+    fn kredensial_ice_dipetakan_tanpa_option() {
+        // webrtc-rs memakai String kosong, bukan Option, untuk server tanpa
+        // kredensial. Memetakan None menjadi "null" akan membuat STUN publik
+        // ditolak sebagai kredensial tidak sah.
+        let daftar = vec![
+            crate::api::IceServer {
+                urls: vec!["stun:a".into()],
+                username: None,
+                credential: None,
+            },
+            crate::api::IceServer {
+                urls: vec!["turn:b".into()],
+                username: Some("u".into()),
+                credential: Some("p".into()),
+            },
+        ];
+        let hasil = ubah_ice(daftar);
+        assert_eq!(hasil[0].username, "");
+        assert_eq!(hasil[1].username, "u");
+        assert_eq!(hasil[1].credential, "p");
     }
 }

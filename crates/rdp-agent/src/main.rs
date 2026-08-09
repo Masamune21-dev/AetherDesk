@@ -18,6 +18,7 @@ mod capture;
 mod encode;
 mod identitas;
 mod monitor;
+mod rtc;
 mod signal;
 
 use anyhow::{bail, Result};
@@ -34,7 +35,7 @@ fn main() -> Result<()> {
         "capture" => perintah_capture(&argumen[1..]),
         "encode" => perintah_encode(&argumen[1..]),
         "enrol" | "enroll" => jalankan_async(perintah_enrol(&argumen[1..])),
-        "connect" => jalankan_async(perintah_connect()),
+        "connect" => jalankan_async(perintah_connect(&argumen[1..])),
         "status" => perintah_status(),
         "--help" | "-h" | "help" => {
             bantuan();
@@ -422,13 +423,25 @@ async fn perintah_enrol(argumen: &[String]) -> Result<()> {
 
 // ── connect ──────────────────────────────────────────────────────────────────
 
-async fn perintah_connect() -> Result<()> {
+async fn perintah_connect(argumen: &[String]) -> Result<()> {
     let konfig = identitas::muat_konfig()?;
     let kunci = identitas::muat_kunci()?;
+
+    let atur = rtc::Pengaturan {
+        monitor: opsi(argumen, "--monitor"),
+        fps: opsi(argumen, "--fps")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30),
+        bitrate: opsi(argumen, "--mbps")
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|m| (m * 1_000_000.0) as u32)
+            .unwrap_or(8_000_000),
+    };
 
     tracing::info!(
         device_id = %konfig.device_id,
         server = %konfig.server,
+        fps = atur.fps,
         "agent mulai"
     );
 
@@ -436,11 +449,18 @@ async fn perintah_connect() -> Result<()> {
     // baru ada di M3 — tetapi kegagalannya di sini jauh lebih mudah didiagnosis
     // daripada nanti di tengah sesi.
     match monitor::enumerasi() {
-        Ok(m) => tracing::info!(jumlah = m.len(), "monitor terdeteksi"),
+        Ok(m) => {
+            tracing::info!(jumlah = m.len(), "monitor terdeteksi");
+            if atur.monitor.is_none() {
+                if let Some(p) = m.iter().find(|x| x.is_primary) {
+                    tracing::info!(monitor = %p.name, "akan membagikan monitor primer");
+                }
+            }
+        }
         Err(e) => tracing::warn!(error = %e, "enumerasi monitor gagal"),
     }
 
-    signal::jalankan(konfig, kunci).await
+    signal::jalankan(konfig, kunci, atur).await
 }
 
 // ── status ───────────────────────────────────────────────────────────────────

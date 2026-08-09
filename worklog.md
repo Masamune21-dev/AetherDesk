@@ -403,18 +403,89 @@ Ambang di test itu sempat salah, dan encoder-nya yang benar.
 Windows dengan `E_FAIL` telanjang — masuk akal, karena belum ada apa pun untuk
 dibuang, tetapi pesannya tidak mengatakan itu. Dihapus.
 
-**47. Keadaan M2**
+**47. M2c — WebRTC di sisi agent**
+
+Signaling, TURN, persetujuan, dan siklus hidup sesi di server tidak disentuh
+sama sekali. Agent native menggantikan **satu ujung** dari koneksi yang sudah
+bekerja, persis seperti yang dijanjikan NEXT_PLAN.md §11 — dan viewer browser
+yang sudah berjalan di produksi tidak diubah satu baris pun.
+
+**Versi crate: 0.14, bukan 0.20.** Rilis 0.20 adalah penulisan ulang di atas
+inti Sans-I/O dengan API yang jauh lebih rendah tingkatnya —
+`TrackLocalStaticSample` di sana menuntut `MediaStreamTrack` yang SSRC dan
+codec-nya disusun sendiri. Rancangannya menarik, tetapi mempelajarinya sambil
+mengejar frame pertama menambah satu variabel yang tidak perlu. Dengan 0.14,
+kode yang sudah ditulis kompilasi bersih pada percobaan pertama.
+
+**Capture dan encode menempati thread OS sendiri.** Objek Direct3D dan Media
+Foundation terikat pada thread tempat mereka dibuat dan bukan `Send`, sehingga
+tidak dapat hidup di dalam task async yang bebas berpindah thread. Hasilnya
+diserahkan lewat channel — yang juga kebetulan bentuk yang benar untuk
+pekerjaan yang memblokir. `blocking_send` menahan thread capture saat penerima
+tertinggal, dan itu perilaku yang diinginkan: menumpuk frame di memori hanya
+menambah latensi tanpa menambah satu pun frame yang benar-benar sampai.
+
+**Trickle ICE, bukan menunggu pengumpulan selesai.** Menunggu berarti beberapa
+detik sunyi sebelum gambar pertama, dan pada jaringan yang harus jatuh ke TURN
+penantian itu paling terasa.
+
+**Kredensial TURN diambil saat agent menyala**, bukan saat sesi pertama
+diminta. Relay yang tidak terkonfigurasi adalah kesalahan penyiapan, dan
+menemukannya saat start jauh lebih baik daripada menemukannya ketika seseorang
+sedang menunggu layar muncul.
+
+**48. Celah yang saya buat sendiri, dan tutup**
+
+`GET /api/v1/turn-credentials` memakai ekstraktor `Terautentikasi`, yang sejak
+butir 36 **menolak token perangkat**. Artinya agent — pihak yang justru paling
+membutuhkan relay — tidak bisa memperolehnya.
+
+Ditutup dengan ekstraktor `SubjekTerautentikasi` yang menerima keduanya.
+Sengaja langka: sebagian besar endpoint memang milik salah satu pihak saja, dan
+pemisahan itulah yang menahan perangkat tersusupi agar tidak menjadi pijakan ke
+seluruh organisasi. Kredensial TURN adalah pengecualian yang sah karena sebuah
+sesi punya dua ujung. Nama pengguna TURN memuat id subjek, jadi pemakaian relay
+tetap dapat ditelusuri ke perangkat tertentu.
+
+Terverifikasi di produksi: `kredensial TURN diperoleh, relay tersedia`.
+
+**49. Agent native tidak meminta persetujuan — dan itu masalah**
+
+QUICK_CONNECT.md §4.1 mewajibkan prompt persetujuan yang menyebutkan siapa yang
+meminta dan apa yang dapat ia lakukan. Agent berbasis browser memenuhinya
+lengkap dengan tombol Tolak yang ber-`autofocus` dan Izinkan yang terkunci tiga
+detik.
+
+Agent native **menerima setiap permintaan secara otomatis**. Ia tidak punya
+antarmuka untuk bertanya, dan tidak ada seorang pun yang perlu menyetujui.
+
+Untuk mesin tanpa pengawasan itu memang perilaku yang dimaksudkan. Tetapi
+konsekuensinya harus tertulis, bukan tersirat: **siapa pun yang memegang device
+ID dan password sesi memperoleh layar mesin ini tanpa ada yang menyadarinya.**
+Password sekali pakai dan rotasi setelah sesi adalah satu-satunya yang
+membatasinya sekarang.
+
+Ini pekerjaan M5, dan sudah dirancang di NEXT_PLAN.md §7.2 — indikator yang
+selalu tampil, tingkat izin terpisah, jeda otomatis saat pengguna lokal
+bergerak. Sampai itu ada, agent native ini pantas dijalankan hanya pada mesin
+milik sendiri.
+
+**50. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|
 | Capture DXGI | **selesai** |
 | Encode H.264 | **selesai** (perangkat lunak; perangkat keras menyusul) |
-| Kirim lewat WebRTC | belum |
+| Kirim lewat WebRTC | **kode selesai, menunggu uji viewer** |
 
-Yang belum terbukti: tidak ada dekoder yang pernah benar-benar membuka berkas
-itu dan menampilkan gambarnya. Struktur, dimensi, dan konversi warna sudah
-diverifikasi masing-masing, tetapi bukti visual ujung ke ujung baru datang di
-M2c — ketika browser, yaitu dekoder yang memang jadi sasaran, menampilkannya.
+Biner agent 11,8 MB — masih di bawah batas NFR-PER-06 (20 MB); WebRTC menambah
+sekitar 7 MB.
+
+Yang belum terbukti dan hanya dapat dibuktikan manusia: gambar benar-benar
+muncul di browser. Seluruh jalur sudah diverifikasi sepotong-sepotong — capture
+dilihat dengan mata, dimensi H.264 dibaca dari SPS oleh parser terpisah,
+konversi warna diuji pulang-pergi, TURN diperoleh, signaling tersambung — tetapi
+belum ada satu pun frame yang menempuh seluruhnya sampai ke sebuah layar.
 
 Pemutaran dan konversi warna masih di CPU. Tempatnya kelak di GPU, sesuai
 STREAMING.md §1.

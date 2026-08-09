@@ -15,7 +15,7 @@
 //! sandi, sehingga kelemahan tumbukan SHA-1 tidak berlaku di sini.
 
 use crate::{
-    auth::Terautentikasi,
+    auth::SubjekTerautentikasi,
     error::{ApiResult, Sukses},
     state::AppState,
 };
@@ -48,9 +48,15 @@ pub struct KredensialResp {
 ///
 /// Wajib terautentikasi. Relay adalah komponen termahal yang dioperasikan,
 /// jadi tidak ada alasan membagikannya kepada pemanggil anonim.
+///
+/// Menerima token pengguna **maupun** token perangkat. Sebuah sesi punya dua
+/// ujung, dan keduanya perlu relay; agent yang tidak dapat memperolehnya akan
+/// gagal tepat pada jaringan yang paling membutuhkannya. Karena nama pengguna
+/// TURN memuat id subjek, jejak pemakaian relay tetap dapat ditelusuri ke
+/// perangkat tertentu, bukan melebur menjadi anonim.
 pub async fn kredensial(
     State(state): State<AppState>,
-    Terautentikasi(claims): Terautentikasi,
+    subjek: SubjekTerautentikasi,
 ) -> ApiResult<Sukses<KredensialResp>> {
     let Some(turn) = &state.turn else {
         // TURN belum dikonfigurasi: kembalikan STUN saja, bukan galat.
@@ -66,7 +72,7 @@ pub async fn kredensial(
     };
 
     let kedaluwarsa = chrono::Utc::now().timestamp() + TTL_DETIK;
-    let username = format!("{kedaluwarsa}:{}", claims.user_id());
+    let username = format!("{kedaluwarsa}:{}", subjek.subjek);
     let credential = tanda_tangan(&username, &turn.secret);
 
     let urls = vec![
@@ -75,7 +81,11 @@ pub async fn kredensial(
         format!("turn:{}:{}?transport=tcp", turn.host, turn.port),
     ];
 
-    tracing::debug!(user = %claims.user_id(), "kredensial TURN diterbitkan");
+    tracing::debug!(
+        subjek = %subjek.subjek,
+        perangkat = subjek.adalah_perangkat,
+        "kredensial TURN diterbitkan"
+    );
 
     Ok(Sukses::baru(KredensialResp {
         ice_servers: vec![
