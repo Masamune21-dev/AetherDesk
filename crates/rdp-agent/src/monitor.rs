@@ -94,10 +94,18 @@ pub(crate) fn siapkan_dpi() {
     static SEKALI: Once = Once::new();
     SEKALI.call_once(|| unsafe {
         if let Err(e) = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
-            tracing::warn!(
-                error = %e,
-                "gagal menyatakan kesadaran DPI per monitor — koordinat mungkin tervirtualisasi"
-            );
+            // `E_ACCESSDENIED` berarti kesadaran DPI **sudah** ditetapkan, dan
+            // sejak biner ini punya manifest itulah keadaan yang normal:
+            // manifest berlaku sebelum satu baris kode pun dieksekusi.
+            // Memperingatkan di sini akan menyalahkan keberhasilan.
+            if e.code() == windows::Win32::Foundation::E_ACCESSDENIED {
+                tracing::debug!("kesadaran DPI sudah ditetapkan manifest");
+            } else {
+                tracing::warn!(
+                    error = %e,
+                    "gagal menyatakan kesadaran DPI per monitor — koordinat mungkin tervirtualisasi"
+                );
+            }
         }
     });
 }

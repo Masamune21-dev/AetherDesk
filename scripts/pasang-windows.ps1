@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Memasang agent AetherDesk pada Windows.
 

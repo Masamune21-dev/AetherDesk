@@ -1063,7 +1063,86 @@ sertifikat code signing mewajibkan kunci privat di perangkat keras
 bersertifikasi FIPS, bukan berkas PFX. Sampai itu diurus, SmartScreen akan
 memperingatkan setiap orang yang memasang — temuan T-18.
 
-**76. Keadaan M2**
+**77. Koreksi: tanda tangan kode tidak wajib dibayar**
+
+Butir 75 menyebut T-18 seolah satu-satunya jalan, dan itu keliru menyampaikan
+keadaan. `.exe`-nya sudah jadi dan berjalan; tidak ada yang perlu dibeli untuk
+membuatnya, menyalinnya, atau memasangnya. Yang berbayar hanya sertifikat dari
+CA tepercaya, dan tugasnya hanya satu: menghentikan peringatan SmartScreen bagi
+orang yang **mengunduhnya dari internet**.
+
+| Cara mendistribusikan | SmartScreen |
+|---|---|
+| USB | tidak muncul |
+| Jaringan atau folder bersama | tidak muncul |
+| Diunduh lewat browser | muncul sekali |
+
+Peringatan itu berasal dari penanda Mark-of-the-Web yang dipasang **browser**;
+berkas yang tidak pernah lewat browser tidak memilikinya. Untuk memasang di
+mesin sendiri, biayanya nol.
+
+Sertifikat EV $300–500/tahun juga bukan satu-satunya pilihan berbayar — Azure
+Trusted Signing berada di kisaran $10/bulan. Itu yang pertama patut dicek bila
+kelak aplikasinya benar-benar dibagikan, bukan EV.
+
+**78. Metadata versi dan manifest**
+
+Tanpa keduanya, biner muncul di Properties tanpa nama, tanpa versi, tanpa
+penerbit — dan SmartScreen menyebutnya "Unknown publisher" atas berkas yang
+bahkan tidak punya deskripsi. Metadata tidak menghilangkan peringatan; ia
+mengubah apa yang dibaca orang ketika peringatan itu muncul.
+
+Manifest membawa empat hal yang masing-masing punya sebab:
+
+| Isi | Sebab |
+|---|---|
+| `asInvoker` | Capture dan injeksi input tidak butuh administrator. Meminta elevasi yang tidak dibutuhkan memperbesar akibat bila agent disusupi, dan mengajari pengguna menyetujui UAC tanpa membaca |
+| `PerMonitorV2` | Berlaku sebelum satu baris kode pun dieksekusi, sehingga tidak ada jendela yang sempat dibuat dalam mode tervirtualisasi |
+| `activeCodePage UTF-8` | Pesan berbahasa Indonesia tidak lagi bergantung pada code page ANSI mesin |
+| `supportedOS` | Tanpa daftar ini Windows menerapkan lapisan kompatibilitas lawas, dan sebagian API melaporkan versi sistem yang keliru |
+
+Karena manifest kini menyatakan DPI, panggilan `SetProcessDpiAwarenessContext`
+saat runtime ditolak dengan `E_ACCESSDENIED` — dan itu **keberhasilan**, bukan
+kegagalan. Peringatannya diturunkan ke debug; memperingatkan di sana akan
+menyalahkan keadaan yang benar.
+
+**79. Penandatanganan swa-tanda**
+
+Sertifikat swa-tanda tidak menghilangkan peringatan bagi orang asing, dan
+skripnya mengatakan itu apa adanya. Yang ia berikan tetap tiga hal nyata: pada
+mesin yang memercayainya peringatan hilang sepenuhnya, nama penerbit
+menggantikan "Unknown publisher", dan berkasnya menjadi anti-rusak — satu byte
+berubah membatalkan tanda tangannya.
+
+Kunci privat memakai `KeyExportPolicy NonExportable` dan tidak pernah menjadi
+berkas di disk. Yang diekspor hanya bagian publiknya.
+
+Dua hal yang ketahuan saat menjalankannya:
+
+**`Set-AuthenticodeSignature` melaporkan `UnknownError`** dengan pesan "root
+certificate which is not trusted". Itu bukan kegagalan — tanda tangannya sudah
+terpasang; yang gagal adalah memverifikasinya, karena akar swa-tanda memang
+belum dipercaya mesin mana pun, termasuk yang baru saja membuatnya.
+Memperlakukannya sebagai galat akan membuat skrip selalu gagal pada pemakaian
+pertama padahal hasilnya benar. Sekarang dipastikan lewat
+`Get-AuthenticodeSignature`, bukan lewat status.
+
+**PowerShell 5.1 membaca `.ps1` sebagai ANSI kecuali ada BOM.** Tanda pisah
+panjang di dalam string membuat parser mengira string-nya tidak pernah
+ditutup, dan galatnya menunjuk baris yang sama sekali berbeda. Ketiga skrip
+kini diawali BOM UTF-8.
+
+Stempel waktu ikut dipasang, sehingga tanda tangan tetap sah setelah
+sertifikatnya kedaluwarsa — tanpa itu, berkas yang ditandatangani hari ini
+menjadi tidak sah begitu masa berlakunya habis meskipun berkasnya tidak
+berubah.
+
+`percayai-sertifikat.ps1` menampilkan sidik jari dan meminta pengguna
+mencocokkannya lewat jalur lain sebelum melanjutkan. Sertifikat yang datang
+bersama berkas yang ditandatanganinya tidak membuktikan apa pun: penyerang
+yang mengganti binernya akan mengganti sertifikatnya sekalian.
+
+**80. Keadaan M2**
 
 | Bagian | Keadaan |
 |---|---|
